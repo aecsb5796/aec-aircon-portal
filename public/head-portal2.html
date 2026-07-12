@@ -106,8 +106,10 @@
       <textarea id="e_technician_notes"></textarea>
       <label>Recommendations</label>
       <textarea id="e_recommendations"></textarea>
-      <label>Next Service Due Date</label>
-      <input type="date" id="e_next_service_date">
+      <div class="grid2">
+        <div><label>Date Started</label><input type="date" id="e_date_started"></div>
+        <div><label>Date Finished</label><input type="date" id="e_date_finished"></div>
+      </div>
     </div>
 
     <div class="card">
@@ -192,7 +194,8 @@ async function openReport(id) {
   document.getElementById('e_amount').value = r.amount || '';
   document.getElementById('e_technician_notes').value = r.technician_notes || '';
   document.getElementById('e_recommendations').value = r.recommendations || '';
-  document.getElementById('e_next_service_date').value = r.next_service_date || '';
+  document.getElementById('e_date_started').value = r.date_started || '';
+  document.getElementById('e_date_finished').value = r.date_finished || '';
   document.getElementById('e_head_remarks').value = r.head_remarks || '';
 
   document.getElementById('e_complaint_description').value = r.complaint_description || '';
@@ -247,7 +250,8 @@ async function saveEdits() {
     amount: document.getElementById('e_amount').value,
     technician_notes: document.getElementById('e_technician_notes').value,
     recommendations: document.getElementById('e_recommendations').value,
-    next_service_date: document.getElementById('e_next_service_date').value,
+    date_started: document.getElementById('e_date_started').value,
+    date_finished: document.getElementById('e_date_finished').value,
     head_remarks: document.getElementById('e_head_remarks').value,
     status: 'reviewed'
   };

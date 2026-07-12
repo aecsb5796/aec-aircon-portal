@@ -127,8 +127,16 @@
         <textarea id="technician_notes"></textarea>
         <label>Recommendations to Customer</label>
         <textarea id="recommendations"></textarea>
-        <label>Next Service Due Date</label>
-        <input type="date" id="next_service_date">
+        <div class="grid2">
+          <div>
+            <label>Date Started</label>
+            <input type="date" id="date_started" required>
+          </div>
+          <div>
+            <label>Date Finished</label>
+            <input type="date" id="date_finished" required>
+          </div>
+        </div>
       </div>
 
       <div class="card">
@@ -325,6 +333,20 @@ function toast(msg, isErr) {
 
 document.getElementById('reportForm').addEventListener('submit', async (e) => {
   e.preventDefault();
+
+  // Date Started / Date Finished must be filled in, and both signatures
+  // must be drawn, before the report can be submitted.
+  if (!document.getElementById('date_started').value || !document.getElementById('date_finished').value) {
+    toast('Please fill in both Date Started and Date Finished.', true);
+    return;
+  }
+  const techSigOk = _sigState['techSig'] && _sigState['techSig'].hasDrawn;
+  const custSigOk = _sigState['custSig'] && _sigState['custSig'].hasDrawn;
+  if (!techSigOk || !custSigOk) {
+    toast('Both the technician and customer signatures are required before the report can be sent.', true);
+    return;
+  }
+
   const btn = document.getElementById('submitBtn');
   btn.disabled = true;
   document.getElementById('submitStatus').textContent = 'Submitting...';
@@ -357,7 +379,8 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
   fd.append('parts_json', JSON.stringify(parts));
   fd.append('technician_notes', document.getElementById('technician_notes').value);
   fd.append('recommendations', document.getElementById('recommendations').value);
-  fd.append('next_service_date', document.getElementById('next_service_date').value);
+  fd.append('date_started', document.getElementById('date_started').value);
+  fd.append('date_finished', document.getElementById('date_finished').value);
   fd.append('technician_signature', getSignatureDataUrl('techSig'));
   fd.append('customer_signature', getSignatureDataUrl('custSig'));
   fd.append('customer_ack', document.getElementById('customer_ack').checked ? '1' : '');
