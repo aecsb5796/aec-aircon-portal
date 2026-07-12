@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AEC Sdn Bhd - Service Portal Login</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <div class="login-wrap">
@@ -20,7 +20,8 @@
       <button class="btn" type="submit" style="width:100%">Log In</button>
     </form>
     <div class="hint">
-      Demo accounts &mdash; Technician: <b>tech1</b> / <b>tech1234</b><br>
+      Demo accounts &mdash; Technician: <b>tech1</b> / <b>tech1234</b> (or <b>alexteam</b> / <b>alex1234</b>)<br>
+      Scheduler: <b>scheduler1</b> / <b>sched1234</b><br>
       Head of Department: <b>head</b> / <b>head1234</b>
     </div>
   </div>
@@ -40,20 +41,22 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     });
     const data = await res.json();
     if (!res.ok) { errEl.textContent = data.error || 'Login failed'; return; }
-    if (data.user.role === 'technician') {
-      window.location.href = '/technician.html';
-    } else {
-      window.location.href = '/head.html';
-    }
+    window.location.href = roleUrl(data.user.role);
   } catch (err) {
     errEl.textContent = 'Could not reach server';
   }
 });
 
+function roleUrl(role) {
+  if (role === 'technician') return '/technician.html';
+  if (role === 'scheduler') return '/scheduler.html';
+  return '/head.html';
+}
+
 // If already logged in, redirect
 fetch('/api/me').then(r => r.json()).then(data => {
   if (data.user) {
-    window.location.href = data.user.role === 'technician' ? '/technician.html' : '/head.html';
+    window.location.href = roleUrl(data.user.role);
   }
 });
 </script>

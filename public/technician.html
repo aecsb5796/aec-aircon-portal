@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AEC Sdn Bhd - Technician Portal</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <div class="topbar">
@@ -17,11 +17,28 @@
 <div class="container">
 
   <div class="tabs">
-    <div class="tab active" id="tabNew" onclick="showTab('new')">New Report</div>
+    <div class="tab active" id="tabAssigned" onclick="showTab('assigned')">Assigned Jobs</div>
+    <div class="tab" id="tabNew" onclick="showTab('new')">New Report</div>
     <div class="tab" id="tabHistory" onclick="showTab('history')">My Reports</div>
   </div>
 
-  <div id="viewNew">
+  <div id="viewAssigned">
+    <div class="card">
+      <h2>Jobs Assigned To Me by Scheduler</h2>
+      <table class="list" id="assignedTable">
+        <thead><tr><th>Job Ref</th><th>Customer</th><th>Phone</th><th>Complaint</th><th>Pref. Date</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="viewNew" style="display:none;">
+    <div class="card" id="completingBanner" style="display:none;background:#fdf6ec;border-color:#f0dfc0;">
+      <div class="complaint-box" style="margin:0;background:transparent;border:none;padding:0;">
+        <span class="lbl">Completing Assigned Job <span id="completingJobRef"></span> &mdash; Nature of Complaint</span>
+        <span id="completingComplaint"></span>
+      </div>
+    </div>
     <form id="reportForm">
       <div class="card">
         <h2>Job &amp; Customer Details</h2>
@@ -162,6 +179,7 @@ const DEFAULT_CHECKLIST = [
 
 let currentUser = null;
 let uploadedFiles = [];
+let completingJobId = null;
 
 async function init() {
   const me = await fetch('/api/me').then(r => r.json());
@@ -173,7 +191,39 @@ async function init() {
   addPartRow();
   initSignaturePad('techSig');
   initSignaturePad('custSig');
+  loadAssigned();
   loadHistory();
+}
+
+async function loadAssigned() {
+  const data = await fetch('/api/reports').then(r => r.json());
+  const rows = (data.reports || []).filter(r => r.status === 'assigned');
+  const tbody = document.querySelector('#assignedTable tbody');
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.job_ref}</td>
+      <td>${r.customer_name}</td>
+      <td>${r.customer_phone || ''}</td>
+      <td>${(r.complaint_description || '').slice(0, 60)}${(r.complaint_description || '').length > 60 ? '…' : ''}</td>
+      <td>${r.service_date || '-'}</td>
+      <td><button type="button" class="btn small" onclick="startJob(${r.id})">Start / Complete</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">No jobs assigned to you right now.</td></tr>';
+}
+
+async function startJob(id) {
+  const data = await fetch('/api/reports/' + id).then(r => r.json());
+  const r = data.report;
+  if (!r) { toast('Could not load job', true); return; }
+  completingJobId = id;
+  document.getElementById('customer_name').value = r.customer_name || '';
+  document.getElementById('customer_phone').value = r.customer_phone || '';
+  document.getElementById('customer_address').value = r.customer_address || '';
+  document.getElementById('service_date').value = r.service_date || new Date().toISOString().slice(0,10);
+  document.getElementById('completingJobRef').textContent = r.job_ref;
+  document.getElementById('completingComplaint').textContent = r.complaint_description || '';
+  document.getElementById('completingBanner').style.display = '';
+  document.getElementById('submitBtn').textContent = 'Submit Completed Job to Head of Department';
+  showTab('new');
 }
 
 function buildChecklist() {
@@ -208,11 +258,20 @@ document.getElementById('photos').addEventListener('change', (e) => {
 });
 
 function showTab(tab) {
+  document.getElementById('tabAssigned').classList.toggle('active', tab === 'assigned');
   document.getElementById('tabNew').classList.toggle('active', tab === 'new');
   document.getElementById('tabHistory').classList.toggle('active', tab === 'history');
+  document.getElementById('viewAssigned').style.display = tab === 'assigned' ? '' : 'none';
   document.getElementById('viewNew').style.display = tab === 'new' ? '' : 'none';
   document.getElementById('viewHistory').style.display = tab === 'history' ? '' : 'none';
+  if (tab === 'assigned') loadAssigned();
   if (tab === 'history') loadHistory();
+  if (tab === 'new' && completingJobId === null) resetCompletingBanner();
+}
+
+function resetCompletingBanner() {
+  document.getElementById('completingBanner').style.display = 'none';
+  document.getElementById('submitBtn').textContent = 'Submit Report to Head of Department';
 }
 
 async function loadHistory() {
@@ -271,7 +330,8 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
   uploadedFiles.forEach(f => fd.append('photos', f));
 
   try {
-    const res = await fetch('/api/reports', { method: 'POST', body: fd });
+    const url = completingJobId ? ('/api/reports/' + completingJobId + '/complete') : '/api/reports';
+    const res = await fetch(url, { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed');
     toast('Report ' + data.job_ref + ' submitted to Head of Department.');
@@ -283,6 +343,8 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
     uploadedFiles = [];
     clearSig('techSig'); clearSig('custSig');
     document.getElementById('submitStatus').textContent = '';
+    completingJobId = null;
+    resetCompletingBanner();
     showTab('history');
   } catch (err) {
     toast(err.message, true);

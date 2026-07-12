@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AEC Sdn Bhd - Head of Department Portal</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <div class="topbar">
@@ -23,6 +23,7 @@
         <div>
           <select id="statusFilter" onchange="loadList()">
             <option value="">All statuses</option>
+            <option value="assigned">Assigned (not started)</option>
             <option value="submitted">Submitted</option>
             <option value="reviewed">Reviewed</option>
             <option value="approved">Approved</option>
@@ -47,6 +48,11 @@
         <span class="badge" id="detailStatus"></span>
       </div>
       <div class="muted" id="detailMeta"></div>
+    </div>
+
+    <div class="card" id="complaintCard">
+      <h2>Nature of Complaint (as reported)</h2>
+      <textarea id="e_complaint_description" placeholder="What the customer originally reported..."></textarea>
     </div>
 
     <div class="card">
@@ -174,6 +180,8 @@ async function openReport(id) {
   document.getElementById('e_next_service_date').value = r.next_service_date || '';
   document.getElementById('e_head_remarks').value = r.head_remarks || '';
 
+  document.getElementById('e_complaint_description').value = r.complaint_description || '';
+
   let checklist = [];
   try { checklist = JSON.parse(r.checklist_json || '[]'); } catch(e) {}
   document.getElementById('detailChecklist').innerHTML = checklist.map(c =>
@@ -212,6 +220,7 @@ async function saveEdits() {
     unit_location: document.getElementById('e_unit_location').value,
     customer_address: document.getElementById('e_customer_address').value,
     unit_details: document.getElementById('e_unit_details').value,
+    complaint_description: document.getElementById('e_complaint_description').value,
     work_performed: document.getElementById('e_work_performed').value,
     findings: document.getElementById('e_findings').value,
     technician_notes: document.getElementById('e_technician_notes').value,
