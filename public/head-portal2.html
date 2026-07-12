@@ -143,7 +143,7 @@ let currentReportId = null;
 async function init() {
   const me = await fetch('/api/me').then(r => r.json());
   if (!me.user || me.user.role !== 'head') { window.location.href = '/'; return; }
-  document.getElementById('userName').textContent = me.user.name;
+  document.getElementById('userName').textContent = 'AEC Sdn Bhd (Head of Department)';
   loadList();
 }
 
