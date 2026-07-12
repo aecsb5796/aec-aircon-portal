@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AEC Sdn Bhd - Service Portal Login</title>
+<link rel="stylesheet" href="/app-styles.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <img src="/img/logo.png" alt="AEC Sdn Bhd" class="login-logo">
+    <h1>AEC Sdn Bhd</h1>
+    <p class="sub">Air-Conditioning Service Report Portal</p>
+    <div class="error" id="err"></div>
+    <form id="loginForm">
+      <label>Username</label>
+      <input type="text" id="username" autocomplete="username" required>
+      <label>Password</label>
+      <input type="password" id="password" autocomplete="current-password" required>
+      <button class="btn" type="submit" style="width:100%">Log In</button>
+    </form>
+    <div class="hint">
+      Forgot your login? Contact your administrator.
+    </div>
+  </div>
+</div>
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const errEl = document.getElementById('err');
+  errEl.textContent = '';
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Login failed'; return; }
+    window.location.href = roleUrl(data.user.role);
+  } catch (err) {
+    errEl.textContent = 'Could not reach server';
+  }
+});
+
+function roleUrl(role) {
+  if (role === 'technician') return '/technician-portal2.html';
+  if (role === 'scheduler') return '/scheduler-portal2.html';
+  return '/head-portal2.html';
+}
+
+// If already logged in, redirect
+fetch('/api/me').then(r => r.json()).then(data => {
+  if (data.user) {
+    window.location.href = roleUrl(data.user.role);
+  }
+});
+</script>
+</body>
+</html>

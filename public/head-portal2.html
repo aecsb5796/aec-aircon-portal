@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AEC Sdn Bhd - Head of Department Portal</title>
+<link rel="stylesheet" href="/app-styles.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><img src="/img/logo.png" alt="AEC Sdn Bhd" class="brand-logo"><div class="brand-text"><strong>AEC Sdn Bhd</strong><span>Head of Department Portal</span></div></div>
+  <div class="userbox">
+    <span id="userName"></span>
+    <button class="logout" onclick="logout()">Log Out</button>
+  </div>
+</div>
+<div class="container">
+
+  <div id="viewList">
+    <div class="card">
+      <div class="flex-between">
+        <h2 style="border:none;margin:0;padding:0;">Service Reports</h2>
+        <div>
+          <select id="statusFilter" onchange="loadList()">
+            <option value="">All statuses</option>
+            <option value="assigned">Assigned (not started)</option>
+            <option value="submitted">Submitted</option>
+            <option value="reviewed">Reviewed</option>
+            <option value="approved">Approved</option>
+            <option value="sent">Sent</option>
+          </select>
+        </div>
+      </div>
+      <table class="list" id="listTable">
+        <thead><tr><th>Job Ref</th><th>Date</th><th>Technician</th><th>Customer</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="viewDetail" style="display:none;">
+    <button class="btn secondary small" onclick="backToList()">&larr; Back to list</button>
+    <div style="height:14px;"></div>
+
+    <div class="card">
+      <div class="flex-between">
+        <h2 style="border:none;margin:0;padding:0;" id="detailJobRef"></h2>
+        <span class="badge" id="detailStatus"></span>
+      </div>
+      <div class="muted" id="detailMeta"></div>
+      <div style="margin-top:10px;max-width:220px;">
+        <label>Job Sheet No.</label>
+        <input type="text" id="e_job_sheet_no" style="font-weight:700;margin-bottom:0;">
+      </div>
+    </div>
+
+    <div class="card" id="complaintCard">
+      <h2>Nature of Complaint (as reported)</h2>
+      <textarea id="e_complaint_description" placeholder="What the customer originally reported..."></textarea>
+    </div>
+
+    <div class="card">
+      <h2>Customer Details</h2>
+      <div class="grid2">
+        <div><label>Customer Name</label><input type="text" id="e_customer_name"></div>
+        <div><label>Phone</label><input type="text" id="e_customer_phone"></div>
+      </div>
+      <div class="grid2">
+        <div><label>Email</label><input type="email" id="e_customer_email"></div>
+        <div><label>Unit Location</label><input type="text" id="e_unit_location"></div>
+      </div>
+      <label>Address</label>
+      <textarea id="e_customer_address"></textarea>
+      <label>Unit Details</label>
+      <textarea id="e_unit_details"></textarea>
+    </div>
+
+    <div class="card">
+      <h2>Checklist</h2>
+      <div id="detailChecklist"></div>
+    </div>
+
+    <div class="card">
+      <h2>Work Performed &amp; Findings</h2>
+      <label>Work Performed</label>
+      <textarea id="e_work_performed"></textarea>
+      <label>Findings / Diagnosis</label>
+      <textarea id="e_findings"></textarea>
+      <label>Amount Charged (BND)</label>
+      <input type="number" id="e_amount" step="0.01" min="0">
+    </div>
+
+    <div class="card">
+      <h2>Parts &amp; Materials Used</h2>
+      <div id="detailParts"></div>
+    </div>
+
+    <div class="card">
+      <h2>Photos</h2>
+      <div class="photo-preview" id="detailPhotos"></div>
+    </div>
+
+    <div class="card">
+      <h2>Technician Notes &amp; Recommendations</h2>
+      <label>Technician Notes</label>
+      <textarea id="e_technician_notes"></textarea>
+      <label>Recommendations</label>
+      <textarea id="e_recommendations"></textarea>
+      <label>Next Service Due Date</label>
+      <input type="date" id="e_next_service_date">
+    </div>
+
+    <div class="card">
+      <h2>Technician Sign-Off</h2>
+      <div class="grid2">
+        <div><label>Technician Name</label><input type="text" id="e_written_name"></div>
+        <div><label>Team Member(s)</label><input type="text" id="e_team_members"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Company Remarks (Head of Department)</h2>
+      <textarea id="e_head_remarks" placeholder="Internal remarks or notes to include on the final report..."></textarea>
+    </div>
+
+    <div class="card">
+      <h2>Actions</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn secondary" id="saveBtn" onclick="saveEdits()">Save Changes</button>
+        <button class="btn" id="approveBtn" onclick="approveReport()">Approve Report</button>
+        <a class="btn secondary" id="pdfBtn" target="_blank">View / Print PDF</a>
+        <button class="btn" id="sendBtn" onclick="sendToCustomer()" style="background:#1b8a5a;">Send to Customer by Email</button>
+      </div>
+      <div class="muted" id="actionStatus" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let currentReportId = null;
+
+async function init() {
+  const me = await fetch('/api/me').then(r => r.json());
+  if (!me.user || me.user.role !== 'head') { window.location.href = '/'; return; }
+  document.getElementById('userName').textContent = me.user.name;
+  loadList();
+}
+
+async function loadList() {
+  const data = await fetch('/api/reports').then(r => r.json());
+  const filter = document.getElementById('statusFilter').value;
+  const rows = (data.reports || []).filter(r => !filter || r.status === filter);
+  const tbody = document.querySelector('#listTable tbody');
+  tbody.innerHTML = rows.map(r => `
+    <tr onclick="openReport(${r.id})">
+      <td>${r.job_ref}</td>
+      <td>${r.service_date}</td>
+      <td>${r.technician_name}</td>
+      <td>${r.customer_name}</td>
+      <td><span class="badge ${r.status}">${r.status}</span></td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">No reports yet.</td></tr>';
+}
+
+function backToList() {
+  document.getElementById('viewDetail').style.display = 'none';
+  document.getElementById('viewList').style.display = '';
+  loadList();
+}
+
+async function openReport(id) {
+  currentReportId = id;
+  const data = await fetch('/api/reports/' + id).then(r => r.json());
+  const r = data.report;
+  document.getElementById('viewList').style.display = 'none';
+  document.getElementById('viewDetail').style.display = '';
+
+  document.getElementById('detailJobRef').textContent = r.job_ref;
+  document.getElementById('detailStatus').textContent = r.status;
+  document.getElementById('detailStatus').className = 'badge ' + r.status;
+  document.getElementById('detailMeta').textContent =
+    `Technician: ${r.technician_name}  |  Service Date: ${r.service_date}  |  Type: ${r.service_type}`;
+
+  document.getElementById('e_customer_name').value = r.customer_name || '';
+  document.getElementById('e_customer_phone').value = r.customer_phone || '';
+  document.getElementById('e_customer_email').value = r.customer_email || '';
+  document.getElementById('e_unit_location').value = r.unit_location || '';
+  document.getElementById('e_customer_address').value = r.customer_address || '';
+  document.getElementById('e_unit_details').value = r.unit_details || '';
+  document.getElementById('e_work_performed').value = r.work_performed || '';
+  document.getElementById('e_findings').value = r.findings || '';
+  document.getElementById('e_amount').value = r.amount || '';
+  document.getElementById('e_technician_notes').value = r.technician_notes || '';
+  document.getElementById('e_recommendations').value = r.recommendations || '';
+  document.getElementById('e_next_service_date').value = r.next_service_date || '';
+  document.getElementById('e_head_remarks').value = r.head_remarks || '';
+
+  document.getElementById('e_complaint_description').value = r.complaint_description || '';
+  document.getElementById('e_job_sheet_no').value = r.job_sheet_no || 'K';
+  document.getElementById('e_written_name').value = r.written_name || '';
+  document.getElementById('e_team_members').value = r.team_members || '';
+
+  let checklist = [];
+  try { checklist = JSON.parse(r.checklist_json || '[]'); } catch(e) {}
+  document.getElementById('detailChecklist').innerHTML = checklist.map(c =>
+    `<div class="checklist-item"><input type="checkbox" disabled ${c.done ? 'checked' : ''}><span>${c.label}</span></div>`
+  ).join('') || '<div class="muted">No checklist recorded.</div>';
+
+  let parts = [];
+  try { parts = JSON.parse(r.parts_json || '[]'); } catch(e) {}
+  document.getElementById('detailParts').innerHTML = parts.length
+    ? '<ul>' + parts.map(p => `<li>${p.name} &times; ${p.qty}</li>`).join('') + '</ul>'
+    : '<div class="muted">No parts recorded.</div>';
+
+  let photos = [];
+  try { photos = JSON.parse(r.photos_json || '[]'); } catch(e) {}
+  document.getElementById('detailPhotos').innerHTML = photos.map(f =>
+    `<a href="/uploads/${f}" target="_blank"><img src="/uploads/${f}"></a>`
+  ).join('') || '<div class="muted">No photos attached.</div>';
+
+  document.getElementById('pdfBtn').href = '/api/reports/' + id + '/pdf';
+  document.getElementById('actionStatus').textContent = '';
+}
+
+function toast(msg, isErr) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (isErr ? ' err' : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+async function saveEdits() {
+  const body = {
+    customer_name: document.getElementById('e_customer_name').value,
+    customer_phone: document.getElementById('e_customer_phone').value,
+    customer_email: document.getElementById('e_customer_email').value,
+    unit_location: document.getElementById('e_unit_location').value,
+    customer_address: document.getElementById('e_customer_address').value,
+    unit_details: document.getElementById('e_unit_details').value,
+    complaint_description: document.getElementById('e_complaint_description').value,
+    job_sheet_no: document.getElementById('e_job_sheet_no').value,
+    written_name: document.getElementById('e_written_name').value,
+    team_members: document.getElementById('e_team_members').value,
+    work_performed: document.getElementById('e_work_performed').value,
+    findings: document.getElementById('e_findings').value,
+    amount: document.getElementById('e_amount').value,
+    technician_notes: document.getElementById('e_technician_notes').value,
+    recommendations: document.getElementById('e_recommendations').value,
+    next_service_date: document.getElementById('e_next_service_date').value,
+    head_remarks: document.getElementById('e_head_remarks').value,
+    status: 'reviewed'
+  };
+  const res = await fetch('/api/reports/' + currentReportId, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  if (res.ok) { toast('Changes saved.'); openReport(currentReportId); }
+  else toast('Failed to save.', true);
+}
+
+async function approveReport() {
+  const res = await fetch('/api/reports/' + currentReportId + '/approve', { method: 'POST' });
+  if (res.ok) { toast('Report approved.'); openReport(currentReportId); }
+  else toast('Failed to approve.', true);
+}
+
+async function sendToCustomer() {
+  document.getElementById('actionStatus').textContent = 'Sending...';
+  const res = await fetch('/api/reports/' + currentReportId + '/send', { method: 'POST' });
+  const data = await res.json();
+  if (res.ok) { toast('Report emailed to customer.'); openReport(currentReportId); }
+  else { toast(data.error || 'Failed to send.', true); document.getElementById('actionStatus').textContent = data.error || ''; }
+}
+
+function logout() {
+  fetch('/api/logout', { method: 'POST' }).then(() => window.location.href = '/');
+}
+
+init();
+</script>
+</body>
+</html>
