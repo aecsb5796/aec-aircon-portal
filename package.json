@@ -2,12 +2,12 @@
   "name": "aec-aircon-portal",
   "version": "1.0.0",
   "description": "AEC Sdn Bhd - Aircon Technician Report Portal & Head of Department Review Portal",
-  "main": "aec-server3.js",
+  "main": "aec-server4.js",
   "engines": {
     "node": ">=22.5.0"
   },
   "scripts": {
-    "start": "node aec-server3.js"
+    "start": "node aec-server4.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
