@@ -7,7 +7,8 @@ const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
-const { db, ready } = require('./datastore5');
+const { db, ready } = require('./datastore6');
+const TursoSessionStore = require('./session-store');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,7 +34,11 @@ app.use('/uploads', express.static(uploadsDir));
 // for "/" before our explicit login route below ever runs.
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
+// Sessions are stored in the same persistent Turso database (see
+// session-store.js) instead of express-session's default in-memory store,
+// so logged-in users stay logged in across server restarts / redeploys.
 app.use(session({
+  store: new TursoSessionStore(db),
   secret: process.env.SESSION_SECRET || 'aec-sdn-bhd-change-this-secret',
   resave: false,
   saveUninitialized: false,
@@ -184,12 +189,12 @@ app.post('/api/reports', requireAuth, requireRole('technician'), upload.array('p
     const stmt = db.prepare(`INSERT INTO reports
       (job_ref, technician_id, technician_name, service_date, service_type,
        customer_name, customer_address, customer_email, customer_phone,
-       unit_location, unit_details, unit_model, unit_serial, operating_pressure_psi, current_ampere,
+       unit_location, units_json,
        written_name, team_members, amount,
        checklist_json, work_performed, findings,
        parts_json, photos_json, technician_notes, recommendations, date_started, date_finished,
        technician_signature, customer_signature, customer_ack, status)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
     // Job Reference is auto-assigned by the system (genJobRef above) —
     // technicians never set it themselves, even on ad-hoc/walk-in reports.
@@ -204,11 +209,7 @@ app.post('/api/reports', requireAuth, requireRole('technician'), upload.array('p
       b.customer_email || '',
       b.customer_phone || '',
       b.unit_location || '',
-      b.unit_details || '',
-      b.unit_model || '',
-      b.unit_serial || '',
-      b.operating_pressure_psi || '',
-      b.current_ampere || '',
+      b.units_json || '[]',
       b.written_name || '',
       b.team_members || '',
       b.amount || '',
@@ -259,8 +260,7 @@ app.post('/api/reports/:id/complete', requireAuth, requireRole('technician'), up
     await db.prepare(`UPDATE reports SET
         service_date = ?, service_type = ?,
         customer_name = ?, customer_address = ?, customer_email = ?, customer_phone = ?,
-        unit_location = ?, unit_details = ?, unit_model = ?, unit_serial = ?,
-        operating_pressure_psi = ?, current_ampere = ?,
+        unit_location = ?, units_json = ?,
         written_name = ?, team_members = ?, amount = ?,
         checklist_json = ?, work_performed = ?, findings = ?,
         parts_json = ?, photos_json = ?, technician_notes = ?, recommendations = ?,
@@ -274,11 +274,7 @@ app.post('/api/reports/:id/complete', requireAuth, requireRole('technician'), up
       b.customer_email || '',
       b.customer_phone || row.customer_phone,
       b.unit_location || '',
-      b.unit_details || '',
-      b.unit_model || '',
-      b.unit_serial || '',
-      b.operating_pressure_psi || '',
-      b.current_ampere || '',
+      b.units_json || '[]',
       b.written_name || '',
       b.team_members || '',
       b.amount || '',
@@ -365,7 +361,7 @@ app.put('/api/reports/:id', requireAuth, requireRole('head'), async (req, res) =
     }
 
     const fields = ['customer_name','customer_address','customer_email','customer_phone',
-      'unit_location','unit_details','unit_model','unit_serial','operating_pressure_psi','current_ampere',
+      'unit_location',
       'complaint_description','job_ref','written_name','team_members','amount',
       'work_performed','findings','technician_notes',
       'recommendations','date_started','date_finished','head_remarks','service_type','status'];
@@ -376,6 +372,7 @@ app.put('/api/reports/:id', requireAuth, requireRole('head'), async (req, res) =
     });
     if (b.parts_json !== undefined) { updates.push('parts_json = ?'); values.push(b.parts_json); }
     if (b.checklist_json !== undefined) { updates.push('checklist_json = ?'); values.push(b.checklist_json); }
+    if (b.units_json !== undefined) { updates.push('units_json = ?'); values.push(b.units_json); }
     updates.push("updated_at = datetime('now')");
     values.push(req.params.id);
     await db.prepare(`UPDATE reports SET ${updates.join(', ')} WHERE id = ?`).run(...values);
@@ -436,12 +433,18 @@ function renderReportPdf(doc, report) {
   line('Phone:', report.customer_phone);
   line('Email:', report.customer_email);
   line('Unit Location:', report.unit_location);
-  line('Unit Details:', report.unit_details);
-  if (report.unit_model) line('Unit Model:', report.unit_model);
-  if (report.unit_serial) line('Serial No.:', report.unit_serial);
-  if (report.operating_pressure_psi) line('Operating Pressure (PSI):', report.operating_pressure_psi);
-  if (report.current_ampere) line('Current (Ampere):', report.current_ampere);
   doc.moveDown(0.5);
+
+  let units = [];
+  try { units = JSON.parse(report.units_json || '[]'); } catch (e) {}
+  if (units.length) {
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0b3d63').text('Unit(s) Serviced');
+    doc.fillColor('#000').font('Helvetica').fontSize(10);
+    units.forEach((u, i) => {
+      doc.text(`${i + 1}. Model: ${u.model || '-'}   Serial No.: ${u.serial || '-'}   Operating Pressure (PSI): ${u.psi || '-'}   Current (Ampere): ${u.ampere || '-'}`);
+    });
+    doc.moveDown(0.5);
+  }
 
   if (report.complaint_description) {
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#0b3d63').text('Nature of Complaint (as reported)');
