@@ -73,6 +73,14 @@
       <textarea id="e_customer_address"></textarea>
       <label>Unit Details</label>
       <textarea id="e_unit_details"></textarea>
+      <div class="grid2">
+        <div><label>Unit Model</label><input type="text" id="e_unit_model"></div>
+        <div><label>Serial Number</label><input type="text" id="e_unit_serial"></div>
+      </div>
+      <div class="grid2">
+        <div><label>Operating Pressure (PSI)</label><input type="text" id="e_operating_pressure_psi"></div>
+        <div><label>Current (Ampere)</label><input type="text" id="e_current_ampere"></div>
+      </div>
     </div>
 
     <div class="card">
@@ -189,6 +197,10 @@ async function openReport(id) {
   document.getElementById('e_unit_location').value = r.unit_location || '';
   document.getElementById('e_customer_address').value = r.customer_address || '';
   document.getElementById('e_unit_details').value = r.unit_details || '';
+  document.getElementById('e_unit_model').value = r.unit_model || '';
+  document.getElementById('e_unit_serial').value = r.unit_serial || '';
+  document.getElementById('e_operating_pressure_psi').value = r.operating_pressure_psi || '';
+  document.getElementById('e_current_ampere').value = r.current_ampere || '';
   document.getElementById('e_work_performed').value = r.work_performed || '';
   document.getElementById('e_findings').value = r.findings || '';
   document.getElementById('e_amount').value = r.amount || '';
@@ -241,6 +253,10 @@ async function saveEdits() {
     unit_location: document.getElementById('e_unit_location').value,
     customer_address: document.getElementById('e_customer_address').value,
     unit_details: document.getElementById('e_unit_details').value,
+    unit_model: document.getElementById('e_unit_model').value,
+    unit_serial: document.getElementById('e_unit_serial').value,
+    operating_pressure_psi: document.getElementById('e_operating_pressure_psi').value,
+    current_ampere: document.getElementById('e_current_ampere').value,
     complaint_description: document.getElementById('e_complaint_description').value,
     job_ref: document.getElementById('e_job_ref').value,
     written_name: document.getElementById('e_written_name').value,

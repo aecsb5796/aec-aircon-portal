@@ -91,6 +91,26 @@
         <textarea id="customer_address"></textarea>
         <label>Unit Details (brand, model, capacity/BTU, serial no.)</label>
         <textarea id="unit_details"></textarea>
+        <div class="grid2">
+          <div>
+            <label>Unit Model <span class="muted" style="font-weight:400;">(optional)</span></label>
+            <input type="text" id="unit_model">
+          </div>
+          <div>
+            <label>Serial Number <span class="muted" style="font-weight:400;">(optional)</span></label>
+            <input type="text" id="unit_serial">
+          </div>
+        </div>
+        <div class="grid2">
+          <div>
+            <label>Operating Pressure (PSI) <span class="muted" style="font-weight:400;">(optional)</span></label>
+            <input type="text" id="operating_pressure_psi">
+          </div>
+          <div>
+            <label>Current (Ampere) <span class="muted" style="font-weight:400;">(optional)</span></label>
+            <input type="text" id="current_ampere">
+          </div>
+        </div>
       </div>
 
       <div class="card">
@@ -254,6 +274,10 @@ async function startJob(id) {
   document.getElementById('job_ref_display').value = r.job_ref || '';
   document.getElementById('jobSheetNoBox').style.display = '';
   document.getElementById('amount').value = r.amount || '';
+  document.getElementById('unit_model').value = r.unit_model || '';
+  document.getElementById('unit_serial').value = r.unit_serial || '';
+  document.getElementById('operating_pressure_psi').value = r.operating_pressure_psi || '';
+  document.getElementById('current_ampere').value = r.current_ampere || '';
   document.getElementById('completingJobRef').textContent = r.job_ref;
   document.getElementById('completingComplaint').textContent = r.complaint_description || '';
   document.getElementById('completingBanner').style.display = '';
@@ -370,6 +394,10 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
   fd.append('unit_location', document.getElementById('unit_location').value);
   fd.append('customer_address', document.getElementById('customer_address').value);
   fd.append('unit_details', document.getElementById('unit_details').value);
+  fd.append('unit_model', document.getElementById('unit_model').value);
+  fd.append('unit_serial', document.getElementById('unit_serial').value);
+  fd.append('operating_pressure_psi', document.getElementById('operating_pressure_psi').value);
+  fd.append('current_ampere', document.getElementById('current_ampere').value);
   fd.append('written_name', document.getElementById('written_name').value);
   fd.append('team_members', document.getElementById('team_members').value);
   fd.append('checklist_json', JSON.stringify(checklist));
