@@ -21,16 +21,12 @@
       <h2 style="border:none;margin:0;padding:0;">New Job Assignment</h2>
       <div style="display:flex;gap:12px;">
         <div style="min-width:150px;">
-          <label style="text-align:right;">Job Sheet No. *</label>
-          <input type="text" id="job_sheet_no" value="K" style="text-align:right;font-weight:700;margin-bottom:0;" required>
-        </div>
-        <div style="min-width:150px;">
           <label style="text-align:right;">Amount to Charge (BND)</label>
           <input type="number" id="amount" step="0.01" min="0" style="text-align:right;font-weight:700;margin-bottom:0;" placeholder="Optional">
         </div>
       </div>
     </div>
-    <div class="muted" style="margin-top:4px;">Fields marked * must be filled in before a job can be assigned to a technician.</div>
+    <div class="muted" style="margin-top:4px;">Fields marked * must be filled in before a job can be assigned to a technician. The Job Reference number is assigned automatically once the job is created.</div>
     <div style="height:14px;"></div>
     <form id="jobForm">
       <div class="grid2">
@@ -113,14 +109,10 @@ function toast(msg, isErr) {
 }
 
 function validateNewJobForm() {
-  const jobSheetNo = document.getElementById('job_sheet_no').value.trim();
   const customerName = document.getElementById('customer_name').value.trim();
   const customerAddress = document.getElementById('customer_address').value.trim();
   const customerPhone = document.getElementById('customer_phone').value.trim();
 
-  if (!jobSheetNo || jobSheetNo.toUpperCase() === 'K') {
-    return { ok: false, message: 'Please enter the Job Sheet No. before assigning.', focusId: 'job_sheet_no' };
-  }
   if (!customerName) {
     return { ok: false, message: 'Please enter the Customer Name before assigning.', focusId: 'customer_name' };
   }
@@ -149,7 +141,6 @@ document.getElementById('jobForm').addEventListener('submit', async (e) => {
   document.getElementById('submitStatus').textContent = 'Submitting...';
 
   const body = {
-    job_sheet_no: document.getElementById('job_sheet_no').value.trim(),
     customer_name: document.getElementById('customer_name').value.trim(),
     customer_phone: document.getElementById('customer_phone').value.trim(),
     customer_address: document.getElementById('customer_address').value.trim(),
@@ -167,7 +158,6 @@ document.getElementById('jobForm').addEventListener('submit', async (e) => {
     if (!res.ok) throw new Error(data.error || 'Failed to assign job');
     toast('Job ' + data.job_ref + ' assigned.');
     document.getElementById('jobForm').reset();
-    document.getElementById('job_sheet_no').value = 'K';
     loadJobs();
   } catch (err) {
     toast(err.message, true);

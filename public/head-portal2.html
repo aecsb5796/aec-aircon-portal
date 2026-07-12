@@ -49,8 +49,8 @@
       </div>
       <div class="muted" id="detailMeta"></div>
       <div style="margin-top:10px;max-width:220px;">
-        <label>Job Sheet No.</label>
-        <input type="text" id="e_job_sheet_no" style="font-weight:700;margin-bottom:0;">
+        <label>Job Reference <span class="muted" style="font-weight:400;">(Head of Dept. only)</span></label>
+        <input type="text" id="e_job_ref" style="font-weight:700;margin-bottom:0;">
       </div>
     </div>
 
@@ -199,7 +199,7 @@ async function openReport(id) {
   document.getElementById('e_head_remarks').value = r.head_remarks || '';
 
   document.getElementById('e_complaint_description').value = r.complaint_description || '';
-  document.getElementById('e_job_sheet_no').value = r.job_sheet_no || 'K';
+  document.getElementById('e_job_ref').value = r.job_ref || '';
   document.getElementById('e_written_name').value = r.written_name || '';
   document.getElementById('e_team_members').value = r.team_members || '';
 
@@ -242,7 +242,7 @@ async function saveEdits() {
     customer_address: document.getElementById('e_customer_address').value,
     unit_details: document.getElementById('e_unit_details').value,
     complaint_description: document.getElementById('e_complaint_description').value,
-    job_sheet_no: document.getElementById('e_job_sheet_no').value,
+    job_ref: document.getElementById('e_job_ref').value,
     written_name: document.getElementById('e_written_name').value,
     team_members: document.getElementById('e_team_members').value,
     work_performed: document.getElementById('e_work_performed').value,
@@ -258,8 +258,9 @@ async function saveEdits() {
   const res = await fetch('/api/reports/' + currentReportId, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
+  const data = await res.json().catch(() => ({}));
   if (res.ok) { toast('Changes saved.'); openReport(currentReportId); }
-  else toast('Failed to save.', true);
+  else toast(data.error || 'Failed to save.', true);
 }
 
 async function approveReport() {

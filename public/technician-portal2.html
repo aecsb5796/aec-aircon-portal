@@ -44,8 +44,8 @@
         <div class="flex-between" style="align-items:flex-start;">
           <h2 style="border:none;margin:0;padding:0;">Job &amp; Customer Details</h2>
           <div style="min-width:170px;display:none;" id="jobSheetNoBox">
-            <label style="text-align:right;">Job Sheet No. <span class="muted" style="font-weight:400;">(set by scheduler)</span></label>
-            <input type="text" id="job_sheet_no" value="K" readonly disabled style="text-align:right;font-weight:700;margin-bottom:0;background:#f0f0f0;color:#555;cursor:not-allowed;">
+            <label style="text-align:right;">Job Reference <span class="muted" style="font-weight:400;">(assigned automatically)</span></label>
+            <input type="text" id="job_ref_display" value="" readonly disabled style="text-align:right;font-weight:700;margin-bottom:0;background:#f0f0f0;color:#555;cursor:not-allowed;">
           </div>
         </div>
         <div style="height:14px;"></div>
@@ -251,7 +251,7 @@ async function startJob(id) {
   document.getElementById('customer_phone').value = r.customer_phone || '';
   document.getElementById('customer_address').value = r.customer_address || '';
   document.getElementById('service_date').value = r.service_date || new Date().toISOString().slice(0,10);
-  document.getElementById('job_sheet_no').value = r.job_sheet_no || 'K';
+  document.getElementById('job_ref_display').value = r.job_ref || '';
   document.getElementById('jobSheetNoBox').style.display = '';
   document.getElementById('amount').value = r.amount || '';
   document.getElementById('completingJobRef').textContent = r.job_ref;
@@ -308,7 +308,7 @@ function resetCompletingBanner() {
   document.getElementById('completingBanner').style.display = 'none';
   document.getElementById('submitBtn').textContent = 'Submit Report to Head of Department';
   document.getElementById('jobSheetNoBox').style.display = 'none';
-  document.getElementById('job_sheet_no').value = 'K';
+  document.getElementById('job_ref_display').value = '';
 }
 
 async function loadHistory() {
