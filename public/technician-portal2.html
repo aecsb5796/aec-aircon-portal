@@ -89,28 +89,12 @@
         </div>
         <label>Customer Address / Site</label>
         <textarea id="customer_address"></textarea>
-        <label>Unit Details (brand, model, capacity/BTU, serial no.)</label>
-        <textarea id="unit_details"></textarea>
-        <div class="grid2">
-          <div>
-            <label>Unit Model <span class="muted" style="font-weight:400;">(optional)</span></label>
-            <input type="text" id="unit_model">
-          </div>
-          <div>
-            <label>Serial Number <span class="muted" style="font-weight:400;">(optional)</span></label>
-            <input type="text" id="unit_serial">
-          </div>
-        </div>
-        <div class="grid2">
-          <div>
-            <label>Operating Pressure (PSI) <span class="muted" style="font-weight:400;">(optional)</span></label>
-            <input type="text" id="operating_pressure_psi">
-          </div>
-          <div>
-            <label>Current (Ampere) <span class="muted" style="font-weight:400;">(optional)</span></label>
-            <input type="text" id="current_ampere">
-          </div>
-        </div>
+      </div>
+
+      <div class="card">
+        <h2>Unit(s) Serviced <span class="muted" style="font-weight:400;">(optional)</span></h2>
+        <div id="unitsList"></div>
+        <button type="button" class="btn secondary small" onclick="addUnitRow()">+ Add Unit</button>
       </div>
 
       <div class="card">
@@ -240,6 +224,7 @@ async function init() {
   document.getElementById('service_date').value = new Date().toISOString().slice(0,10);
   document.getElementById('written_name').value = me.user.name;
   buildChecklist();
+  addUnitRow();
   addPartRow();
   initSignaturePad('techSig');
   initSignaturePad('custSig');
@@ -274,10 +259,11 @@ async function startJob(id) {
   document.getElementById('job_ref_display').value = r.job_ref || '';
   document.getElementById('jobSheetNoBox').style.display = '';
   document.getElementById('amount').value = r.amount || '';
-  document.getElementById('unit_model').value = r.unit_model || '';
-  document.getElementById('unit_serial').value = r.unit_serial || '';
-  document.getElementById('operating_pressure_psi').value = r.operating_pressure_psi || '';
-  document.getElementById('current_ampere').value = r.current_ampere || '';
+  document.getElementById('unitsList').innerHTML = '';
+  let existingUnits = [];
+  try { existingUnits = JSON.parse(r.units_json || '[]'); } catch (e) {}
+  if (existingUnits.length) existingUnits.forEach(u => addUnitRow(u));
+  else addUnitRow();
   document.getElementById('completingJobRef').textContent = r.job_ref;
   document.getElementById('completingComplaint').textContent = r.complaint_description || '';
   document.getElementById('completingBanner').style.display = '';
@@ -292,6 +278,26 @@ function buildChecklist() {
       <input type="checkbox" id="chk_${i}">
       <label for="chk_${i}" style="margin:0;font-weight:400;">${label}</label>
     </div>`).join('');
+}
+
+function addUnitRow(prefill) {
+  const list = document.getElementById('unitsList');
+  const row = document.createElement('div');
+  row.className = 'unit-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px;';
+  row.innerHTML = `
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Unit Model</label><input type="text" class="unit-model" style="margin-bottom:0;"></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Serial Number</label><input type="text" class="unit-serial" style="margin-bottom:0;"></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Operating Pressure (PSI)</label><input type="text" class="unit-psi" style="margin-bottom:0;"></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Current (Ampere)</label><input type="text" class="unit-ampere" style="margin-bottom:0;"></div>
+    <button type="button" class="btn secondary small" onclick="this.parentElement.remove()">Remove</button>`;
+  list.appendChild(row);
+  if (prefill) {
+    row.querySelector('.unit-model').value = prefill.model || '';
+    row.querySelector('.unit-serial').value = prefill.serial || '';
+    row.querySelector('.unit-psi').value = prefill.psi || '';
+    row.querySelector('.unit-ampere').value = prefill.ampere || '';
+  }
 }
 
 function addPartRow() {
@@ -382,6 +388,12 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
     name: row.querySelector('.part-name').value,
     qty: row.querySelector('.part-qty').value
   })).filter(p => p.name);
+  const units = Array.from(document.querySelectorAll('.unit-row')).map(row => ({
+    model: row.querySelector('.unit-model').value,
+    serial: row.querySelector('.unit-serial').value,
+    psi: row.querySelector('.unit-psi').value,
+    ampere: row.querySelector('.unit-ampere').value
+  })).filter(u => u.model || u.serial || u.psi || u.ampere);
 
   // Job Sheet No. is never submitted by the technician — it is assigned by
   // the scheduler and can only be changed by the head of department.
@@ -393,11 +405,7 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
   fd.append('customer_email', document.getElementById('customer_email').value);
   fd.append('unit_location', document.getElementById('unit_location').value);
   fd.append('customer_address', document.getElementById('customer_address').value);
-  fd.append('unit_details', document.getElementById('unit_details').value);
-  fd.append('unit_model', document.getElementById('unit_model').value);
-  fd.append('unit_serial', document.getElementById('unit_serial').value);
-  fd.append('operating_pressure_psi', document.getElementById('operating_pressure_psi').value);
-  fd.append('current_ampere', document.getElementById('current_ampere').value);
+  fd.append('units_json', JSON.stringify(units));
   fd.append('written_name', document.getElementById('written_name').value);
   fd.append('team_members', document.getElementById('team_members').value);
   fd.append('checklist_json', JSON.stringify(checklist));
@@ -425,6 +433,8 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
     document.getElementById('written_name').value = currentUser ? currentUser.name : '';
     document.getElementById('partsList').innerHTML = '';
     addPartRow();
+    document.getElementById('unitsList').innerHTML = '';
+    addUnitRow();
     document.getElementById('photoPreview').innerHTML = '';
     uploadedFiles = [];
     clearSig('techSig'); clearSig('custSig');

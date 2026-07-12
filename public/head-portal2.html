@@ -71,16 +71,12 @@
       </div>
       <label>Address</label>
       <textarea id="e_customer_address"></textarea>
-      <label>Unit Details</label>
-      <textarea id="e_unit_details"></textarea>
-      <div class="grid2">
-        <div><label>Unit Model</label><input type="text" id="e_unit_model"></div>
-        <div><label>Serial Number</label><input type="text" id="e_unit_serial"></div>
-      </div>
-      <div class="grid2">
-        <div><label>Operating Pressure (PSI)</label><input type="text" id="e_operating_pressure_psi"></div>
-        <div><label>Current (Ampere)</label><input type="text" id="e_current_ampere"></div>
-      </div>
+    </div>
+
+    <div class="card">
+      <h2>Unit(s) Serviced</h2>
+      <div id="e_unitsList"></div>
+      <button type="button" class="btn secondary small" onclick="addEUnitRow()">+ Add Unit</button>
     </div>
 
     <div class="card">
@@ -196,11 +192,11 @@ async function openReport(id) {
   document.getElementById('e_customer_email').value = r.customer_email || '';
   document.getElementById('e_unit_location').value = r.unit_location || '';
   document.getElementById('e_customer_address').value = r.customer_address || '';
-  document.getElementById('e_unit_details').value = r.unit_details || '';
-  document.getElementById('e_unit_model').value = r.unit_model || '';
-  document.getElementById('e_unit_serial').value = r.unit_serial || '';
-  document.getElementById('e_operating_pressure_psi').value = r.operating_pressure_psi || '';
-  document.getElementById('e_current_ampere').value = r.current_ampere || '';
+  document.getElementById('e_unitsList').innerHTML = '';
+  let existingUnits = [];
+  try { existingUnits = JSON.parse(r.units_json || '[]'); } catch(e) {}
+  if (existingUnits.length) existingUnits.forEach(u => addEUnitRow(u));
+  else addEUnitRow();
   document.getElementById('e_work_performed').value = r.work_performed || '';
   document.getElementById('e_findings').value = r.findings || '';
   document.getElementById('e_amount').value = r.amount || '';
@@ -237,6 +233,26 @@ async function openReport(id) {
   document.getElementById('actionStatus').textContent = '';
 }
 
+function addEUnitRow(prefill) {
+  const list = document.getElementById('e_unitsList');
+  const row = document.createElement('div');
+  row.className = 'unit-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px;';
+  row.innerHTML = `
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Unit Model</label><input type="text" class="unit-model" style="margin-bottom:0;"></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Serial Number</label><input type="text" class="unit-serial" style="margin-bottom:0;"></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Operating Pressure (PSI)</label><input type="text" class="unit-psi" style="margin-bottom:0;"></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Current (Ampere)</label><input type="text" class="unit-ampere" style="margin-bottom:0;"></div>
+    <button type="button" class="btn secondary small" onclick="this.parentElement.remove()">Remove</button>`;
+  list.appendChild(row);
+  if (prefill) {
+    row.querySelector('.unit-model').value = prefill.model || '';
+    row.querySelector('.unit-serial').value = prefill.serial || '';
+    row.querySelector('.unit-psi').value = prefill.psi || '';
+    row.querySelector('.unit-ampere').value = prefill.ampere || '';
+  }
+}
+
 function toast(msg, isErr) {
   const t = document.createElement('div');
   t.className = 'toast' + (isErr ? ' err' : '');
@@ -252,11 +268,12 @@ async function saveEdits() {
     customer_email: document.getElementById('e_customer_email').value,
     unit_location: document.getElementById('e_unit_location').value,
     customer_address: document.getElementById('e_customer_address').value,
-    unit_details: document.getElementById('e_unit_details').value,
-    unit_model: document.getElementById('e_unit_model').value,
-    unit_serial: document.getElementById('e_unit_serial').value,
-    operating_pressure_psi: document.getElementById('e_operating_pressure_psi').value,
-    current_ampere: document.getElementById('e_current_ampere').value,
+    units_json: JSON.stringify(Array.from(document.querySelectorAll('#e_unitsList .unit-row')).map(row => ({
+      model: row.querySelector('.unit-model').value,
+      serial: row.querySelector('.unit-serial').value,
+      psi: row.querySelector('.unit-psi').value,
+      ampere: row.querySelector('.unit-ampere').value
+    })).filter(u => u.model || u.serial || u.psi || u.ampere)),
     complaint_description: document.getElementById('e_complaint_description').value,
     job_ref: document.getElementById('e_job_ref').value,
     written_name: document.getElementById('e_written_name').value,
