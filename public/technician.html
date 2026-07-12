@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AEC Sdn Bhd - Technician Portal</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><strong>AEC Sdn Bhd</strong><span>Technician Portal</span></div>
+  <div class="userbox">
+    <span id="userName"></span>
+    <button class="logout" onclick="logout()">Log Out</button>
+  </div>
+</div>
+<div class="container">
+
+  <div class="tabs">
+    <div class="tab active" id="tabNew" onclick="showTab('new')">New Report</div>
+    <div class="tab" id="tabHistory" onclick="showTab('history')">My Reports</div>
+  </div>
+
+  <div id="viewNew">
+    <form id="reportForm">
+      <div class="card">
+        <h2>Job &amp; Customer Details</h2>
+        <div class="grid2">
+          <div>
+            <label>Service Date</label>
+            <input type="date" id="service_date" required>
+          </div>
+          <div>
+            <label>Service Type</label>
+            <select id="service_type" required>
+              <option value="">-- Select --</option>
+              <option>Installation</option>
+              <option>Corrective Maintenance / Repair</option>
+              <option>Preventive Maintenance</option>
+              <option>Inspection</option>
+              <option>Gas Top-Up</option>
+              <option>Others</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid2">
+          <div>
+            <label>Customer Name</label>
+            <input type="text" id="customer_name" required>
+          </div>
+          <div>
+            <label>Customer Phone</label>
+            <input type="tel" id="customer_phone">
+          </div>
+        </div>
+        <div class="grid2">
+          <div>
+            <label>Customer Email (for sending report)</label>
+            <input type="email" id="customer_email">
+          </div>
+          <div>
+            <label>Unit Location (e.g. Living Room, Office 2F)</label>
+            <input type="text" id="unit_location">
+          </div>
+        </div>
+        <label>Customer Address / Site</label>
+        <textarea id="customer_address"></textarea>
+        <label>Unit Details (brand, model, capacity/BTU, serial no.)</label>
+        <textarea id="unit_details"></textarea>
+      </div>
+
+      <div class="card">
+        <h2>Service Checklist</h2>
+        <div id="checklist"></div>
+      </div>
+
+      <div class="card">
+        <h2>Work Performed &amp; Findings</h2>
+        <label>Work Performed</label>
+        <textarea id="work_performed" placeholder="Describe the work carried out..." required></textarea>
+        <label>Findings / Diagnosis</label>
+        <textarea id="findings" placeholder="Condition of unit, root cause, issues found..."></textarea>
+      </div>
+
+      <div class="card">
+        <h2>Parts &amp; Materials Used</h2>
+        <div id="partsList"></div>
+        <button type="button" class="btn secondary small" onclick="addPartRow()">+ Add Part</button>
+      </div>
+
+      <div class="card">
+        <h2>Photos</h2>
+        <label>Attach photos (before/after, max 8)</label>
+        <input type="file" id="photos" accept="image/*" multiple capture="environment">
+        <div class="photo-preview" id="photoPreview"></div>
+      </div>
+
+      <div class="card">
+        <h2>Notes &amp; Recommendations</h2>
+        <label>Technician Notes / Remarks</label>
+        <textarea id="technician_notes"></textarea>
+        <label>Recommendations to Customer</label>
+        <textarea id="recommendations"></textarea>
+        <label>Next Service Due Date</label>
+        <input type="date" id="next_service_date">
+      </div>
+
+      <div class="card">
+        <h2>Signatures</h2>
+        <div class="grid2">
+          <div>
+            <label>Technician Signature</label>
+            <canvas id="techSig" class="signature-box" width="330" height="130"></canvas>
+            <div class="sig-actions"><button type="button" class="btn secondary small" onclick="clearSig('techSig')">Clear</button></div>
+          </div>
+          <div>
+            <label>Customer Signature (on-site acknowledgement)</label>
+            <canvas id="custSig" class="signature-box" width="330" height="130"></canvas>
+            <div class="sig-actions"><button type="button" class="btn secondary small" onclick="clearSig('custSig')">Clear</button></div>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400;">
+          <input type="checkbox" id="customer_ack" style="width:auto;margin:0;"> Customer acknowledged work completed on site
+        </label>
+      </div>
+
+      <div class="card">
+        <button class="btn" type="submit" id="submitBtn">Submit Report to Head of Department</button>
+        <span class="muted" id="submitStatus" style="margin-left:12px;"></span>
+      </div>
+    </form>
+  </div>
+
+  <div id="viewHistory" style="display:none;">
+    <div class="card">
+      <h2>My Submitted Reports</h2>
+      <table class="list" id="historyTable">
+        <thead><tr><th>Job Ref</th><th>Date</th><th>Customer</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script src="/signature.js"></script>
+<script>
+const DEFAULT_CHECKLIST = [
+  'Checked refrigerant gas level / pressure',
+  'Cleaned / replaced air filter',
+  'Cleaned evaporator coil',
+  'Cleaned condenser coil / outdoor unit',
+  'Checked drainage / condensate pipe',
+  'Checked electrical connections & wiring',
+  'Checked compressor operation',
+  'Checked fan motor operation',
+  'Tested thermostat / remote control',
+  'Checked for refrigerant leaks',
+  'Tested overall cooling performance',
+  'Cleaned unit casing / exterior'
+];
+
+let currentUser = null;
+let uploadedFiles = [];
+
+async function init() {
+  const me = await fetch('/api/me').then(r => r.json());
+  if (!me.user || me.user.role !== 'technician') { window.location.href = '/'; return; }
+  currentUser = me.user;
+  document.getElementById('userName').textContent = me.user.name;
+  document.getElementById('service_date').value = new Date().toISOString().slice(0,10);
+  buildChecklist();
+  addPartRow();
+  initSignaturePad('techSig');
+  initSignaturePad('custSig');
+  loadHistory();
+}
+
+function buildChecklist() {
+  const el = document.getElementById('checklist');
+  el.innerHTML = DEFAULT_CHECKLIST.map((label, i) => `
+    <div class="checklist-item">
+      <input type="checkbox" id="chk_${i}">
+      <label for="chk_${i}" style="margin:0;font-weight:400;">${label}</label>
+    </div>`).join('');
+}
+
+function addPartRow() {
+  const list = document.getElementById('partsList');
+  const row = document.createElement('div');
+  row.className = 'part-row';
+  row.innerHTML = `
+    <input type="text" placeholder="Part / material name" class="part-name">
+    <input type="text" placeholder="Qty" class="part-qty">
+    <button type="button" class="btn secondary small" onclick="this.parentElement.remove()">Remove</button>`;
+  list.appendChild(row);
+}
+
+document.getElementById('photos').addEventListener('change', (e) => {
+  uploadedFiles = Array.from(e.target.files);
+  const preview = document.getElementById('photoPreview');
+  preview.innerHTML = '';
+  uploadedFiles.forEach(f => {
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(f);
+    preview.appendChild(img);
+  });
+});
+
+function showTab(tab) {
+  document.getElementById('tabNew').classList.toggle('active', tab === 'new');
+  document.getElementById('tabHistory').classList.toggle('active', tab === 'history');
+  document.getElementById('viewNew').style.display = tab === 'new' ? '' : 'none';
+  document.getElementById('viewHistory').style.display = tab === 'history' ? '' : 'none';
+  if (tab === 'history') loadHistory();
+}
+
+async function loadHistory() {
+  const data = await fetch('/api/reports').then(r => r.json());
+  const tbody = document.querySelector('#historyTable tbody');
+  tbody.innerHTML = (data.reports || []).map(r => `
+    <tr>
+      <td>${r.job_ref}</td>
+      <td>${r.service_date}</td>
+      <td>${r.customer_name}</td>
+      <td><span class="badge ${r.status}">${r.status}</span></td>
+    </tr>`).join('') || '<tr><td colspan="4" class="muted">No reports submitted yet.</td></tr>';
+}
+
+function toast(msg, isErr) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (isErr ? ' err' : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+document.getElementById('reportForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  document.getElementById('submitStatus').textContent = 'Submitting...';
+
+  const checklist = DEFAULT_CHECKLIST.map((label, i) => ({
+    label, done: document.getElementById('chk_' + i).checked
+  }));
+  const parts = Array.from(document.querySelectorAll('.part-row')).map(row => ({
+    name: row.querySelector('.part-name').value,
+    qty: row.querySelector('.part-qty').value
+  })).filter(p => p.name);
+
+  const fd = new FormData();
+  fd.append('service_date', document.getElementById('service_date').value);
+  fd.append('service_type', document.getElementById('service_type').value);
+  fd.append('customer_name', document.getElementById('customer_name').value);
+  fd.append('customer_phone', document.getElementById('customer_phone').value);
+  fd.append('customer_email', document.getElementById('customer_email').value);
+  fd.append('unit_location', document.getElementById('unit_location').value);
+  fd.append('customer_address', document.getElementById('customer_address').value);
+  fd.append('unit_details', document.getElementById('unit_details').value);
+  fd.append('checklist_json', JSON.stringify(checklist));
+  fd.append('work_performed', document.getElementById('work_performed').value);
+  fd.append('findings', document.getElementById('findings').value);
+  fd.append('parts_json', JSON.stringify(parts));
+  fd.append('technician_notes', document.getElementById('technician_notes').value);
+  fd.append('recommendations', document.getElementById('recommendations').value);
+  fd.append('next_service_date', document.getElementById('next_service_date').value);
+  fd.append('technician_signature', getSignatureDataUrl('techSig'));
+  fd.append('customer_signature', getSignatureDataUrl('custSig'));
+  fd.append('customer_ack', document.getElementById('customer_ack').checked ? '1' : '');
+  uploadedFiles.forEach(f => fd.append('photos', f));
+
+  try {
+    const res = await fetch('/api/reports', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed');
+    toast('Report ' + data.job_ref + ' submitted to Head of Department.');
+    document.getElementById('reportForm').reset();
+    document.getElementById('service_date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('partsList').innerHTML = '';
+    addPartRow();
+    document.getElementById('photoPreview').innerHTML = '';
+    uploadedFiles = [];
+    clearSig('techSig'); clearSig('custSig');
+    document.getElementById('submitStatus').textContent = '';
+    showTab('history');
+  } catch (err) {
+    toast(err.message, true);
+    document.getElementById('submitStatus').textContent = '';
+  }
+  btn.disabled = false;
+});
+
+function logout() {
+  fetch('/api/logout', { method: 'POST' }).then(() => window.location.href = '/');
+}
+
+init();
+</script>
+</body>
+</html>
