@@ -99,8 +99,29 @@
         <textarea id="work_performed" placeholder="Describe the work carried out..." required></textarea>
         <label>Findings / Diagnosis</label>
         <textarea id="findings" placeholder="Condition of unit, root cause, issues found..."></textarea>
-        <label>Amount Charged (BND)</label>
-        <input type="number" id="amount" step="0.01" min="0" placeholder="e.g. 150.00 for installation, servicing, repair, etc.">
+        <div class="grid2">
+          <div>
+            <label>Amount Charged (BND)</label>
+            <input type="number" id="amount" step="0.01" min="0" placeholder="e.g. 150.00 for installation, servicing, repair, etc." oninput="updateNewReportNet()">
+          </div>
+          <div>
+            <label>Discount (BND)</label>
+            <input type="number" id="discount" step="0.01" min="0" placeholder="Optional" oninput="updateNewReportNet()">
+          </div>
+        </div>
+        <div class="muted" id="new_report_net_total" style="font-weight:600;margin-bottom:10px;"></div>
+        <div style="padding:10px;background:#f4f6fc;border:1px solid #dde3f0;border-radius:6px;margin-bottom:10px;">
+          <label style="margin-bottom:6px;">Terms of Payment</label>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;">
+            <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="payment_method" value="cash" style="width:auto;margin:0;"> Cash</label>
+            <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="payment_method" value="bank_transfer" style="width:auto;margin:0;"> Bank Transfer</label>
+            <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="payment_method" value="check" style="width:auto;margin:0;"> Check</label>
+          </div>
+          <div class="muted" style="font-size:0.9em;">
+            <strong>For Bank Transfer &mdash; Account Name: AEC Sdn Bhd</strong><br>
+            BIBD Account: 00-001-01-0019720 &nbsp;|&nbsp; Baiduri Account: 01-00-110-288838
+          </div>
+        </div>
       </div>
 
       <div class="card">
@@ -202,12 +223,32 @@
     <div class="grid2">
       <div>
         <label>Amount Charged (BND)</label>
-        <input type="number" id="te_amount" step="0.01" min="0">
+        <input type="number" id="te_amount" step="0.01" min="0" oninput="updateTechEditNet()">
       </div>
+      <div>
+        <label>Discount (BND)</label>
+        <input type="number" id="te_discount" step="0.01" min="0" oninput="updateTechEditNet()">
+      </div>
+    </div>
+    <div class="muted" id="te_net_total" style="font-weight:600;margin-bottom:10px;"></div>
+    <div style="padding:10px;background:#f4f6fc;border:1px solid #dde3f0;border-radius:6px;margin-bottom:10px;">
+      <label style="margin-bottom:6px;">Terms of Payment</label>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="te_payment_method" value="cash" style="width:auto;margin:0;"> Cash</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="te_payment_method" value="bank_transfer" style="width:auto;margin:0;"> Bank Transfer</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="te_payment_method" value="check" style="width:auto;margin:0;"> Check</label>
+      </div>
+      <div class="muted" style="font-size:0.9em;">
+        <strong>For Bank Transfer &mdash; Account Name: AEC Sdn Bhd</strong><br>
+        BIBD Account: 00-001-01-0019720 &nbsp;|&nbsp; Baiduri Account: 01-00-110-288838
+      </div>
+    </div>
+    <div class="grid2">
       <div>
         <label>Customer Phone</label>
         <input type="tel" id="te_customer_phone">
       </div>
+      <div></div>
     </div>
     <label>Customer Address / Site</label>
     <textarea id="te_customer_address"></textarea>
@@ -285,6 +326,9 @@ async function startJob(id) {
   document.getElementById('job_ref_display').value = r.job_ref || '';
   document.getElementById('jobSheetNoBox').style.display = '';
   document.getElementById('amount').value = r.amount || '';
+  document.getElementById('discount').value = r.discount || '';
+  updateNewReportNet();
+  setCheckedRadio('payment_method', r.payment_method || '');
   document.getElementById('unitsList').innerHTML = '';
   let existingUnits = [];
   try { existingUnits = JSON.parse(r.units_json || '[]'); } catch (e) {}
@@ -452,6 +496,27 @@ function toast(msg, isErr) {
   setTimeout(() => t.remove(), 3500);
 }
 
+// Recomputes the Net Total (Amount minus Discount) shown just below the
+// Amount / Discount fields, on both the report submission form and the
+// post-submission edit panel.
+function updateNewReportNet() {
+  const amount = parseFloat(document.getElementById('amount').value) || 0;
+  const discount = parseFloat(document.getElementById('discount').value) || 0;
+  document.getElementById('new_report_net_total').textContent = 'Net Total (BND): ' + (amount - discount).toFixed(2);
+}
+function updateTechEditNet() {
+  const amount = parseFloat(document.getElementById('te_amount').value) || 0;
+  const discount = parseFloat(document.getElementById('te_discount').value) || 0;
+  document.getElementById('te_net_total').textContent = 'Net Total (BND): ' + (amount - discount).toFixed(2);
+}
+function getCheckedRadio(name) {
+  const el = document.querySelector(`input[name="${name}"]:checked`);
+  return el ? el.value : '';
+}
+function setCheckedRadio(name, value) {
+  document.querySelectorAll(`input[name="${name}"]`).forEach(el => { el.checked = (el.value === value); });
+}
+
 document.getElementById('reportForm').addEventListener('submit', async (e) => {
   e.preventDefault();
 
@@ -513,6 +578,8 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
   fd.append('work_performed', document.getElementById('work_performed').value);
   fd.append('findings', document.getElementById('findings').value);
   fd.append('amount', document.getElementById('amount').value);
+  fd.append('discount', document.getElementById('discount').value);
+  fd.append('payment_method', getCheckedRadio('payment_method'));
   fd.append('parts_json', JSON.stringify(parts));
   fd.append('technician_notes', document.getElementById('technician_notes').value);
   fd.append('recommendations', document.getElementById('recommendations').value);
@@ -532,6 +599,9 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
     document.getElementById('reportForm').reset();
     document.getElementById('service_date').value = new Date().toISOString().slice(0,10);
     document.getElementById('written_name').value = currentUser ? currentUser.name : '';
+    document.getElementById('discount').value = '';
+    setCheckedRadio('payment_method', '');
+    document.getElementById('new_report_net_total').textContent = '';
     document.getElementById('partsList').innerHTML = '';
     addPartRow();
     document.getElementById('unitsList').innerHTML = '';
@@ -581,6 +651,9 @@ function openTechEdit(id) {
   techEditingId = id;
   document.getElementById('techEditJobRef').textContent = r.job_ref;
   document.getElementById('te_amount').value = r.amount || '';
+  document.getElementById('te_discount').value = r.discount || '';
+  updateTechEditNet();
+  setCheckedRadio('te_payment_method', r.payment_method || '');
   document.getElementById('te_customer_phone').value = r.customer_phone || '';
   document.getElementById('te_customer_address').value = r.customer_address || '';
   document.getElementById('te_unitsList').innerHTML = '';
@@ -616,6 +689,8 @@ async function saveTechEdit() {
   }));
   const body = {
     amount: document.getElementById('te_amount').value,
+    discount: document.getElementById('te_discount').value,
+    payment_method: getCheckedRadio('te_payment_method'),
     customer_phone: document.getElementById('te_customer_phone').value,
     customer_address: document.getElementById('te_customer_address').value,
     units_json: JSON.stringify(units)

@@ -20,14 +20,33 @@
     <div class="flex-between" style="align-items:flex-start;">
       <h2 style="border:none;margin:0;padding:0;">New Job Assignment</h2>
       <div style="display:flex;gap:12px;">
-        <div style="min-width:150px;">
+        <div style="min-width:130px;">
           <label style="text-align:right;">Amount to Charge (BND)</label>
-          <input type="number" id="amount" step="0.01" min="0" style="text-align:right;font-weight:700;margin-bottom:0;" placeholder="Optional">
+          <input type="number" id="amount" step="0.01" min="0" style="text-align:right;font-weight:700;margin-bottom:0;" placeholder="Optional" oninput="updateNewJobNet()">
+        </div>
+        <div style="min-width:130px;">
+          <label style="text-align:right;">Discount (BND)</label>
+          <input type="number" id="discount" step="0.01" min="0" style="text-align:right;font-weight:700;margin-bottom:0;" placeholder="Optional" oninput="updateNewJobNet()">
         </div>
       </div>
     </div>
+    <div class="muted" id="new_job_net_total" style="text-align:right;font-weight:600;"></div>
     <div class="muted" style="margin-top:4px;">Fields marked * must be filled in before a job can be assigned to a technician. The Job Reference number is assigned automatically once the job is created.</div>
     <div style="height:14px;"></div>
+
+    <div style="padding:10px;background:#f4f6fc;border:1px solid #dde3f0;border-radius:6px;margin-bottom:14px;">
+      <label style="margin-bottom:6px;">Terms of Payment</label>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="payment_method" value="cash" style="width:auto;margin:0;"> Cash</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="payment_method" value="bank_transfer" style="width:auto;margin:0;"> Bank Transfer</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="payment_method" value="check" style="width:auto;margin:0;"> Check</label>
+      </div>
+      <div class="muted" style="font-size:0.9em;">
+        <strong>For Bank Transfer &mdash; Account Name: AEC Sdn Bhd</strong><br>
+        BIBD Account: 00-001-01-0019720 &nbsp;|&nbsp; Baiduri Account: 01-00-110-288838
+      </div>
+    </div>
+
     <form id="jobForm">
       <div class="grid2">
         <div>
@@ -98,17 +117,37 @@
         <select id="edit_technician_id"></select>
       </div>
       <div>
-        <label>Amount to Charge (BND)</label>
-        <input type="number" id="edit_amount" step="0.01" min="0">
+        <label>Preferred Service Date</label>
+        <input type="date" id="edit_service_date">
       </div>
     </div>
     <label>Customer Address / Site</label>
     <textarea id="edit_customer_address"></textarea>
     <label>Nature of Complaint</label>
     <textarea id="edit_complaint_description"></textarea>
-    <label>Preferred Service Date</label>
-    <input type="date" id="edit_service_date" style="max-width:220px;">
-    <div style="height:6px;"></div>
+    <div class="grid2">
+      <div>
+        <label>Amount to Charge (BND)</label>
+        <input type="number" id="edit_amount" step="0.01" min="0" oninput="updateEditJobNet()">
+      </div>
+      <div>
+        <label>Discount (BND)</label>
+        <input type="number" id="edit_discount" step="0.01" min="0" oninput="updateEditJobNet()">
+      </div>
+    </div>
+    <div class="muted" id="edit_job_net_total" style="font-weight:600;margin-bottom:10px;"></div>
+    <div style="padding:10px;background:#f4f6fc;border:1px solid #dde3f0;border-radius:6px;margin-bottom:10px;">
+      <label style="margin-bottom:6px;">Terms of Payment</label>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="edit_payment_method" value="cash" style="width:auto;margin:0;"> Cash</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="edit_payment_method" value="bank_transfer" style="width:auto;margin:0;"> Bank Transfer</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="radio" name="edit_payment_method" value="check" style="width:auto;margin:0;"> Check</label>
+      </div>
+      <div class="muted" style="font-size:0.9em;">
+        <strong>For Bank Transfer &mdash; Account Name: AEC Sdn Bhd</strong><br>
+        BIBD Account: 00-001-01-0019720 &nbsp;|&nbsp; Baiduri Account: 01-00-110-288838
+      </div>
+    </div>
     <button class="btn" type="button" onclick="saveJobEdit()">Save Changes</button>
     <span class="muted" id="editStatus" style="margin-left:12px;"></span>
   </div>
@@ -179,6 +218,27 @@ function toast(msg, isErr) {
   setTimeout(() => t.remove(), 3500);
 }
 
+// Recomputes the Net Total (Amount minus Discount) shown just below the
+// Amount / Discount fields, on both the New Job Assignment header and the
+// Edit Job panel.
+function updateNewJobNet() {
+  const amount = parseFloat(document.getElementById('amount').value) || 0;
+  const discount = parseFloat(document.getElementById('discount').value) || 0;
+  document.getElementById('new_job_net_total').textContent = 'Net Total (BND): ' + (amount - discount).toFixed(2);
+}
+function updateEditJobNet() {
+  const amount = parseFloat(document.getElementById('edit_amount').value) || 0;
+  const discount = parseFloat(document.getElementById('edit_discount').value) || 0;
+  document.getElementById('edit_job_net_total').textContent = 'Net Total (BND): ' + (amount - discount).toFixed(2);
+}
+function getCheckedRadio(name) {
+  const el = document.querySelector(`input[name="${name}"]:checked`);
+  return el ? el.value : '';
+}
+function setCheckedRadio(name, value) {
+  document.querySelectorAll(`input[name="${name}"]`).forEach(el => { el.checked = (el.value === value); });
+}
+
 function validateNewJobForm() {
   const customerName = document.getElementById('customer_name').value.trim();
   const customerAddress = document.getElementById('customer_address').value.trim();
@@ -218,7 +278,9 @@ document.getElementById('jobForm').addEventListener('submit', async (e) => {
     complaint_description: document.getElementById('complaint_description').value,
     technician_id: document.getElementById('technician_id').value,
     service_date: document.getElementById('service_date').value,
-    amount: document.getElementById('amount').value
+    amount: document.getElementById('amount').value,
+    discount: document.getElementById('discount').value,
+    payment_method: getCheckedRadio('payment_method')
   };
 
   try {
@@ -229,6 +291,12 @@ document.getElementById('jobForm').addEventListener('submit', async (e) => {
     if (!res.ok) throw new Error(data.error || 'Failed to assign job');
     toast('Job ' + data.job_ref + ' assigned.');
     document.getElementById('jobForm').reset();
+    // Amount / Discount / Terms of Payment live in the card header, outside
+    // <form id="jobForm">, so they need to be cleared separately.
+    document.getElementById('amount').value = '';
+    document.getElementById('discount').value = '';
+    setCheckedRadio('payment_method', '');
+    document.getElementById('new_job_net_total').textContent = '';
     loadJobs();
   } catch (err) {
     toast(err.message, true);
@@ -298,6 +366,9 @@ function openEditPanel(id) {
   document.getElementById('editJobRef').textContent = r.job_ref;
   document.getElementById('edit_technician_id').value = r.technician_id;
   document.getElementById('edit_amount').value = r.amount || '';
+  document.getElementById('edit_discount').value = r.discount || '';
+  updateEditJobNet();
+  setCheckedRadio('edit_payment_method', r.payment_method || '');
   document.getElementById('edit_customer_address').value = r.customer_address || '';
   document.getElementById('edit_complaint_description').value = r.complaint_description || '';
   document.getElementById('edit_service_date').value = r.service_date || '';
@@ -316,6 +387,8 @@ async function saveJobEdit() {
   const body = {
     technician_id: document.getElementById('edit_technician_id').value,
     amount: document.getElementById('edit_amount').value,
+    discount: document.getElementById('edit_discount').value,
+    payment_method: getCheckedRadio('edit_payment_method'),
     customer_address: document.getElementById('edit_customer_address').value,
     complaint_description: document.getElementById('edit_complaint_description').value,
     service_date: document.getElementById('edit_service_date').value
