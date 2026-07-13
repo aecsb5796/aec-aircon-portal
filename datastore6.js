@@ -134,8 +134,15 @@ CREATE TABLE IF NOT EXISTS customer_blocklist (
   // Guarded by schema_meta so it only runs once per database.
   const usersMigration = await db.prepare("SELECT value FROM schema_meta WHERE key = ?").get('users_role_account_v1');
   if (!usersMigration) {
+    // Follows SQLite's standard "12-step" table-rebuild procedure: turn off
+    // FK enforcement first (dropping `users` while `reports` still has a
+    // FOREIGN KEY pointing at it can otherwise be rejected), and drop any
+    // `users_new` left over from an earlier attempt that didn't finish
+    // (e.g. a crashed/retried deploy) so re-running this is always safe.
+    await db.exec('PRAGMA foreign_keys=OFF;');
+    await db.exec('DROP TABLE IF EXISTS users_new;');
     await db.exec(`
-      CREATE TABLE IF NOT EXISTS users_new (
+      CREATE TABLE users_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
@@ -148,6 +155,7 @@ CREATE TABLE IF NOT EXISTS customer_blocklist (
       DROP TABLE users;
       ALTER TABLE users_new RENAME TO users;
     `);
+    await db.exec('PRAGMA foreign_keys=ON;');
     await db.prepare("INSERT INTO schema_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run('users_role_account_v1', '1');
   }
 
