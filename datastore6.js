@@ -153,6 +153,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     { username: 'khonglak', password: 'Khongaec', name: 'Khonglak', role: 'technician' },
     { username: 'wawantiyo', password: 'wawanaec', name: 'Wawantiyo', role: 'technician' },
     { username: 'marcial', password: 'marcialaec', name: 'Marcial', role: 'technician' },
+    { username: 'ujang', password: 'ujangaec', name: 'Ujang', role: 'technician' },
+    { username: 'hariyanto', password: 'hariaec', name: 'Hariyanto', role: 'technician' },
     { username: 'aecnora', password: 'aec5796', name: 'Nora (Scheduler)', role: 'scheduler' },
     { username: 'head', password: 'head5796', name: 'Hj. Rahman (Head of Dept)', role: 'head' }
   ];
