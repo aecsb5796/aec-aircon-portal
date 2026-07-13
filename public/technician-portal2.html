@@ -310,7 +310,9 @@ async function loadAssigned() {
       <td>${r.customer_phone || ''}</td>
       <td>${(r.complaint_description || '').slice(0, 60)}${(r.complaint_description || '').length > 60 ? '…' : ''}</td>
       <td>${r.service_date || '-'}</td>
-      <td><button type="button" class="btn small" onclick="startJob(${r.id})">Start / Complete</button></td>
+      <td>${r.head_approved_at
+        ? `<button type="button" class="btn small" onclick="startJob(${r.id})">Start / Complete</button>`
+        : `<span class="muted" style="font-style:italic;">Awaiting Head approval</span>`}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="muted">No jobs assigned to you right now.</td></tr>';
 }
 

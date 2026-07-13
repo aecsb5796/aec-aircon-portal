@@ -318,7 +318,14 @@ async function loadJobs() {
   });
   const tbody = document.querySelector('#jobsTable tbody');
   tbody.innerHTML = rows.map(r => {
-    const statusLabel = r.cancelled_at ? 'cancelled' : r.status;
+    let statusLabel = r.cancelled_at ? 'cancelled' : r.status;
+    let badgeClass = statusLabel;
+    // A newly-assigned job sits waiting for the Head of Department to
+    // review and approve it before the technician can open/start it.
+    if (!r.cancelled_at && r.status === 'assigned' && !r.head_approved_at) {
+      statusLabel = 'pending approval';
+      badgeClass = 'pending-approval';
+    }
     const statusTitle = r.cancelled_at ? `title="Reason: ${(r.cancel_reason || '').replace(/"/g, '&quot;')}"` : '';
     const actions = [];
     if (!r.cancelled_at && r.status === 'assigned') {
@@ -334,7 +341,7 @@ async function loadJobs() {
       <td>${r.customer_name}</td>
       <td>${r.technician_name}</td>
       <td>${(r.complaint_description || '').slice(0, 60)}${(r.complaint_description || '').length > 60 ? '…' : ''}</td>
-      <td><span class="badge ${statusLabel}" ${statusTitle}>${statusLabel}</span></td>
+      <td><span class="badge ${badgeClass}" ${statusTitle}>${statusLabel}</span></td>
       <td style="white-space:nowrap;">${actions.join(' ')}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="6" class="muted">No jobs scheduled yet.</td></tr>';

@@ -17,6 +17,15 @@
 <div class="container">
 
   <div id="viewList">
+    <div class="card" id="pendingApprovalsCard">
+      <h2>Pending Job Approvals</h2>
+      <div class="muted" style="margin-bottom:8px;">New job assignments from the Scheduler wait here until you approve them — the technician cannot open or start the job until you do.</div>
+      <table class="list" id="pendingApprovalsTable">
+        <thead><tr><th>Job Ref</th><th>Customer</th><th>Technician</th><th>Complaint</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
     <div class="card">
       <div class="flex-between">
         <h2 style="border:none;margin:0;padding:0;">Service Reports</h2>
@@ -261,8 +270,10 @@ async function removeBlocklist(id) {
 
 async function loadList() {
   const data = await fetch('/api/reports').then(r => r.json());
+  const allReports = data.reports || [];
+  renderPendingApprovals(allReports);
   const filter = document.getElementById('statusFilter').value;
-  const rows = (data.reports || []).filter(r => {
+  const rows = allReports.filter(r => {
     if (filter === 'cancelled') return !!r.cancelled_at;
     if (filter === 'rejected') return !!r.reject_reason && !r.cancelled_at;
     if (!filter) return true;
@@ -271,17 +282,42 @@ async function loadList() {
   const tbody = document.querySelector('#listTable tbody');
   tbody.innerHTML = rows.map(r => {
     let label = r.status;
-    if (r.cancelled_at) label = 'cancelled';
-    else if (r.reject_reason) label = 'rejected';
+    let badgeClass = r.status;
+    if (r.cancelled_at) { label = 'cancelled'; badgeClass = 'cancelled'; }
+    else if (r.reject_reason) { label = 'rejected'; badgeClass = 'rejected'; }
+    else if (r.status === 'assigned' && !r.head_approved_at) { label = 'pending approval'; badgeClass = 'pending-approval'; }
     return `
     <tr onclick="openReport(${r.id})">
       <td>${r.job_ref}</td>
       <td>${r.service_date}</td>
       <td>${r.technician_name}</td>
       <td>${r.customer_name}</td>
-      <td><span class="badge ${label}">${label}</span></td>
+      <td><span class="badge ${badgeClass}">${label}</span></td>
     </tr>`;
   }).join('') || '<tr><td colspan="5" class="muted">No reports yet.</td></tr>';
+}
+
+// Jobs the Scheduler has just assigned, still awaiting the Head's review —
+// the technician cannot open/start these until approveJobAssignment() below
+// is called for them.
+function renderPendingApprovals(allReports) {
+  const rows = allReports.filter(r => r.status === 'assigned' && !r.cancelled_at && !r.head_approved_at);
+  const tbody = document.querySelector('#pendingApprovalsTable tbody');
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.job_ref}</td>
+      <td>${r.customer_name}</td>
+      <td>${r.technician_name}</td>
+      <td>${(r.complaint_description || '').slice(0, 60)}${(r.complaint_description || '').length > 60 ? '…' : ''}</td>
+      <td><button type="button" class="btn small" onclick="approveJobAssignment(${r.id})">Approve &mdash; Allow Technician to Start</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">No job assignments waiting for approval.</td></tr>';
+}
+
+async function approveJobAssignment(id) {
+  const res = await fetch('/api/jobs/' + id + '/approve', { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) { toast('Job approved — the technician can now start it.'); loadList(); }
+  else toast(data.error || 'Failed to approve job.', true);
 }
 
 function backToList() {
