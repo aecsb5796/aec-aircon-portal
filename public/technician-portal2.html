@@ -178,9 +178,9 @@
   <div id="viewHistory" style="display:none;">
     <div class="card">
       <h2>My Submitted Reports</h2>
-      <div class="muted" style="margin-bottom:8px;">You can still edit the amount, address, unit(s) serviced, and contact number on a report after submitting it &mdash; until it's been sent to Accounts for invoicing.</div>
+      <div class="muted" style="margin-bottom:8px;">You can still edit the amount, address, unit(s) serviced, and contact number on a report after submitting it &mdash; until it's been sent to Accounts for invoicing. You can also save a copy of the PDF or share it directly to the customer via WhatsApp or another app.</div>
       <table class="list" id="historyTable">
-        <thead><tr><th>Job Ref</th><th>Date</th><th>Customer</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Job Ref</th><th>Date</th><th>Customer</th><th>Status</th><th>Report</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -397,15 +397,49 @@ async function loadHistory() {
     } else {
       action = `<button type="button" class="btn secondary small" onclick="openTechEdit(${r.id})">Edit</button>`;
     }
+    const reportActions = `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <a class="btn secondary small" href="/api/reports/${r.id}/pdf" target="_blank" rel="noopener">Save PDF</a>
+        <button type="button" class="btn secondary small" onclick="shareReportPdf(${r.id}, '${(r.job_ref || '').replace(/'/g, "\\'")}')">Share</button>
+      </div>`;
     return `
     <tr>
       <td>${r.job_ref}</td>
       <td>${r.service_date}</td>
       <td>${r.customer_name}</td>
       <td><span class="badge ${r.cancelled_at ? 'cancelled' : r.status}">${r.cancelled_at ? 'cancelled' : r.status}</span></td>
+      <td>${reportActions}</td>
       <td>${action}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="5" class="muted">No reports submitted yet.</td></tr>';
+  }).join('') || '<tr><td colspan="6" class="muted">No reports submitted yet.</td></tr>';
+}
+
+// Lets a technician save a copy of the submitted report's PDF, or share it
+// straight to WhatsApp / another app already installed on their device,
+// once the report has been submitted to the Head of Department. Uses the
+// Web Share API (with a file attachment) where the browser supports it;
+// otherwise falls back to opening the PDF so it can be saved and shared
+// manually.
+async function shareReportPdf(id, jobRef) {
+  try {
+    const res = await fetch('/api/reports/' + id + '/pdf');
+    if (!res.ok) throw new Error('Failed to load PDF');
+    const blob = await res.blob();
+    const file = new File([blob], (jobRef || 'report') + '.pdf', { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        files: [file],
+        title: 'AEC Service Report ' + jobRef,
+        text: 'AEC Sdn Bhd service report ' + jobRef,
+      });
+    } else {
+      window.open('/api/reports/' + id + '/pdf', '_blank');
+      toast('Sharing isn\'t supported on this browser. The PDF has been opened — save it, then share it manually via WhatsApp or another app.');
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return; // user cancelled the share sheet
+    toast('Could not prepare the PDF to share.', true);
+  }
 }
 
 function toast(msg, isErr) {
