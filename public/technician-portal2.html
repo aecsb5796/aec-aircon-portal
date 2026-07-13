@@ -18,7 +18,6 @@
 
   <div class="tabs">
     <div class="tab active" id="tabAssigned" onclick="showTab('assigned')">Assigned Jobs</div>
-    <div class="tab" id="tabNew" onclick="showTab('new')">New Report</div>
     <div class="tab" id="tabHistory" onclick="showTab('history')">My Reports</div>
   </div>
 
@@ -364,8 +363,11 @@ document.getElementById('photos').addEventListener('change', (e) => {
 });
 
 function showTab(tab) {
+  // Note: there is no nav tab for 'new' any more — technicians can only reach
+  // the report form by starting an assigned job (see startJob()), which
+  // calls showTab('new') directly. The Assigned Jobs / My Reports tabs are
+  // the only two entries in the tab bar now.
   document.getElementById('tabAssigned').classList.toggle('active', tab === 'assigned');
-  document.getElementById('tabNew').classList.toggle('active', tab === 'new');
   document.getElementById('tabHistory').classList.toggle('active', tab === 'history');
   document.getElementById('viewAssigned').style.display = tab === 'assigned' ? '' : 'none';
   document.getElementById('viewNew').style.display = tab === 'new' ? '' : 'none';
