@@ -476,7 +476,7 @@ app.put('/api/reports/:id', requireAuth, requireRole('head'), async (req, res) =
 
     const fields = ['customer_name','customer_address','customer_email','customer_phone',
       'unit_location',
-      'complaint_description','job_ref','written_name','team_members','amount',
+      'complaint_description','job_ref','written_name','team_members','amount','discount',
       'work_performed','findings','technician_notes',
       'recommendations','date_started','date_finished','head_remarks','service_type','status'];
     const updates = [];
@@ -588,20 +588,35 @@ app.post('/api/reports/:id/send-to-accounts', requireAuth, requireRole('head'), 
 });
 
 // ---------- PDF generation ----------
-// Renders report content into an already-created PDFDocument. Caller owns
-// creating the document and piping/collecting its output.
-function renderReportPdf(doc, report) {
-  // Letterhead
-  doc.fillColor('#0b3d63').fontSize(20).font('Helvetica-Bold').text('AEC Sdn Bhd', 50, 50);
-  doc.fillColor('#444').fontSize(9).font('Helvetica')
-    .text('Air Conditioning Sales, Installation & Maintenance Services', 50)
-    .text('Brunei Darussalam', 50);
-  doc.x = 50;
-  doc.moveTo(50, doc.y + 8).lineTo(545, doc.y + 8).strokeColor('#0b3d63').lineWidth(1.5).stroke();
-  doc.moveDown(1.5);
+function money(v) {
+  const n = parseFloat(v);
+  return isNaN(n) ? '0.00' : n.toFixed(2);
+}
 
-  doc.fillColor('#0b3d63').fontSize(14).font('Helvetica-Bold').text('AIR-CONDITIONING SERVICE REPORT', { align: 'center' });
-  doc.moveDown(0.8);
+// Renders report content into an already-created PDFDocument. Caller owns
+// creating the document and piping/collecting its output. Laid out as an
+// invoice-style job sheet — a bordered job info box (name/company, address,
+// job sheet no., date, phone/email), a description/qty/price/amount table,
+// a Sub Total / Discount / Net Total summary, and the company's bank
+// account details — matching the paper job sheet AEC technicians fill in
+// the field, followed by the full text of the report (unit details,
+// findings, checklist, parts, notes, photos, and signatures).
+function renderReportPdf(doc, report) {
+  const LEFT = 50, RIGHT = 545, WIDTH = RIGHT - LEFT;
+  const NAVY = '#0b3d63';
+  const GREY = '#999';
+
+  // Letterhead
+  doc.fillColor(NAVY).fontSize(20).font('Helvetica-Bold').text('AEC Sdn Bhd', LEFT, 50);
+  doc.fillColor('#444').fontSize(8.5).font('Helvetica')
+    .text('Air Conditioning Sales, Installation & Maintenance Services', LEFT)
+    .text('SPG 1923, Lot 19598, Kiarong Pengkalan Batu, P.O. Box 2666, Bandar Seri Begawan BS8675, Negara Brunei Darussalam', LEFT);
+  doc.x = LEFT;
+  doc.moveTo(LEFT, doc.y + 8).lineTo(RIGHT, doc.y + 8).strokeColor(NAVY).lineWidth(1.5).stroke();
+  doc.moveDown(1.1);
+
+  doc.fillColor(NAVY).fontSize(13).font('Helvetica-Bold').text('AIR-CONDITIONING SERVICE REPORT / JOB SHEET', LEFT, doc.y, { align: 'center', width: WIDTH });
+  doc.moveDown(0.6);
   doc.fillColor('#000');
 
   const line = (label, value) => {
@@ -609,34 +624,122 @@ function renderReportPdf(doc, report) {
     doc.font('Helvetica').fontSize(10).text('  ' + (value || '-'));
   };
 
-  doc.font('Helvetica-Bold').fontSize(11).text('Job Reference: ' + report.job_ref);
-  doc.moveDown(0.3);
-  line('Service Date:', report.service_date);
-  line('Service Type:', report.service_type);
-  line('Technician:', report.technician_name);
-  if (report.amount) {
-    line('Amount Charged (BND):', report.amount);
-  }
-  doc.moveDown(0.5);
+  // ---- Job info box: Name/Company + Address (left) | Job Sheet No, Date, Phone/Email (right) ----
+  const boxX = LEFT, boxY = doc.y, boxW = WIDTH, boxH = 82;
+  const midX = boxX + boxW * 0.6;
+  const rowH = boxH / 3;
+  doc.rect(boxX, boxY, boxW, boxH).strokeColor(GREY).lineWidth(0.75).stroke();
+  doc.moveTo(midX, boxY).lineTo(midX, boxY + boxH).strokeColor(GREY).stroke();
+  doc.moveTo(midX, boxY + rowH).lineTo(boxX + boxW, boxY + rowH).stroke();
+  doc.moveTo(midX, boxY + rowH * 2).lineTo(boxX + boxW, boxY + rowH * 2).stroke();
 
-  doc.font('Helvetica-Bold').fontSize(11).fillColor('#0b3d63').text('Customer Details');
   doc.fillColor('#000');
-  line('Name:', report.customer_name);
-  line('Address:', report.customer_address);
-  line('Phone:', report.customer_phone);
-  line('Email:', report.customer_email);
-  doc.moveDown(0.5);
+  doc.font('Helvetica-Bold').fontSize(8).text('NAME / COMPANY', boxX + 8, boxY + 6);
+  doc.font('Helvetica-Bold').fontSize(10).text(report.customer_name || '-', boxX + 8, boxY + 17, { width: midX - boxX - 16 });
+  doc.font('Helvetica-Bold').fontSize(8).text('ADDRESS', boxX + 8, boxY + 40);
+  doc.font('Helvetica').fontSize(8.5).text(report.customer_address || '-', boxX + 8, boxY + 51, { width: midX - boxX - 16, height: 26, ellipsis: true });
 
+  doc.font('Helvetica-Bold').fontSize(8).text('JOB SHEET NO', midX + 8, boxY + 6);
+  doc.font('Helvetica-Bold').fontSize(10).text(report.job_ref || '-', midX + 8, boxY + 17);
+  doc.font('Helvetica-Bold').fontSize(8).text('DATE', midX + 8, boxY + rowH + 6);
+  doc.font('Helvetica').fontSize(9).text(report.service_date || '-', midX + 8, boxY + rowH + 17);
+  doc.font('Helvetica-Bold').fontSize(8).text('PHONE / EMAIL', midX + 8, boxY + rowH * 2 + 6);
+  doc.font('Helvetica').fontSize(8.5).text([report.customer_phone, report.customer_email].filter(Boolean).join('  /  ') || '-', midX + 8, boxY + rowH * 2 + 17, { width: boxX + boxW - midX - 16 });
+
+  doc.x = LEFT;
+  doc.y = boxY + boxH + 10;
+  doc.fillColor('#000');
+
+  // ---- Service type / job location / technician ----
   let units = [];
   try { units = JSON.parse(report.units_json || '[]'); } catch (e) {}
+  const jobLocation = units.map(u => u.location).filter(Boolean).join(', ');
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY).text('SERVICE TYPE:', LEFT, doc.y, { continued: true });
+  doc.font('Helvetica').fillColor('#000').fontSize(9).text('  ' + (report.service_type || '-') + (jobLocation ? '      JOB LOCATION:  ' + jobLocation : ''));
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY).text('TECHNICIAN:', LEFT, doc.y + 2, { continued: true });
+  doc.font('Helvetica').fillColor('#000').fontSize(9).text('  ' + (report.technician_name || '-'));
+  doc.moveDown(0.4);
+
   if (units.length) {
-    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0b3d63').text('Unit(s) Serviced');
-    doc.fillColor('#000').font('Helvetica').fontSize(10);
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY).text('UNIT TYPE / MODEL / SERIAL NO', LEFT, doc.y);
+    doc.fillColor('#000').font('Helvetica').fontSize(8.5);
     units.forEach((u, i) => {
-      doc.text(`${i + 1}. Location: ${u.location || '-'}   Model: ${u.model || '-'}   Serial No.: ${u.serial || '-'}   Operating Pressure (PSI): ${u.psi || '-'}   Current (Ampere): ${u.ampere || '-'}`);
+      doc.text(`${i + 1}. Model: ${u.model || '-'}   Serial No.: ${u.serial || '-'}   Operating Pressure (PSI): ${u.psi || '-'}   Current (Ampere): ${u.ampere || '-'}`);
     });
-    doc.moveDown(0.5);
+    doc.moveDown(0.4);
   }
+
+  // ---- Job description / cost table ----
+  const tX = LEFT, tW = WIDTH;
+  const colDescW = tW * 0.58, colQtyW = tW * 0.1, colPriceW = tW * 0.15, colAmtW = tW * 0.17;
+  const descText = report.work_performed || report.complaint_description || report.service_type || '-';
+  doc.font('Helvetica').fontSize(9);
+  const descH = Math.max(18, doc.heightOfString(descText, { width: colDescW - 12 }) + 8);
+  if (doc.y + 16 + descH > 760) doc.addPage();
+  const tY = doc.y;
+  const headH = 16;
+
+  doc.rect(tX, tY, tW, headH).fillAndStroke('#eef2f8', GREY);
+  doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(8.5);
+  doc.text('JOB DESCRIPTION', tX + 6, tY + 4, { width: colDescW - 12 });
+  doc.text('QTY', tX + colDescW, tY + 4, { width: colQtyW, align: 'center' });
+  doc.text('U-PRICE (BND)', tX + colDescW + colQtyW, tY + 4, { width: colPriceW, align: 'center' });
+  doc.text('AMOUNT (BND)', tX + colDescW + colQtyW + colPriceW, tY + 4, { width: colAmtW, align: 'center' });
+
+  const rowY = tY + headH;
+  doc.rect(tX, rowY, tW, descH).strokeColor(GREY).lineWidth(0.75).stroke();
+  [colDescW, colDescW + colQtyW, colDescW + colQtyW + colPriceW].forEach(off => {
+    doc.moveTo(tX + off, rowY).lineTo(tX + off, rowY + descH).stroke();
+  });
+  doc.fillColor('#000').font('Helvetica').fontSize(9);
+  doc.text(descText, tX + 6, rowY + 4, { width: colDescW - 12 });
+  doc.text('1', tX + colDescW, rowY + 4, { width: colQtyW, align: 'center' });
+  doc.text(report.amount ? money(report.amount) : '-', tX + colDescW + colQtyW, rowY + 4, { width: colPriceW, align: 'center' });
+  doc.text(report.amount ? money(report.amount) : '-', tX + colDescW + colQtyW + colPriceW, rowY + 4, { width: colAmtW, align: 'center' });
+
+  doc.y = rowY + descH + 8;
+  doc.x = LEFT;
+
+  // ---- Sub Total / Discount / Net Total ----
+  const subtotal = parseFloat(report.amount) || 0;
+  const discount = parseFloat(report.discount) || 0;
+  const net = subtotal - discount;
+  const sumW = 200, sumX = RIGHT - sumW, sumRowH = 15;
+  if (doc.y + sumRowH * 3 > 770) doc.addPage();
+  const sumY = doc.y;
+  const sumRows = [
+    ['SUB TOTAL (BND)', money(subtotal)],
+    ['DISCOUNT (BND)', money(discount)],
+    ['NET TOTAL (BND)', money(net)]
+  ];
+  doc.rect(sumX, sumY, sumW, sumRowH * sumRows.length).strokeColor(GREY).lineWidth(0.75).stroke();
+  sumRows.forEach(([label, value], i) => {
+    const ry = sumY + i * sumRowH;
+    if (i > 0) doc.moveTo(sumX, ry).lineTo(sumX + sumW, ry).strokeColor(GREY).stroke();
+    const bold = i === sumRows.length - 1;
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(9).fillColor(bold ? NAVY : '#000');
+    doc.text(label, sumX + 8, ry + 4, { width: sumW * 0.55 });
+    doc.text(value, sumX + sumW * 0.55, ry + 4, { width: sumW * 0.45 - 8, align: 'right' });
+  });
+
+  doc.y = sumY + sumRowH * sumRows.length + 12;
+  doc.x = LEFT;
+  doc.fillColor('#000');
+
+  // ---- Payment note & bank details ----
+  doc.font('Helvetica').fontSize(7.5).fillColor('#555').text(
+    'Kindly note that the customer hereby accepts the above goods and/or services and agrees to make full payment by the due date. In the event of non-payment, the customer agrees to bear all costs and expenses (including legal fees on a full indemnity basis) incurred by AEC Sdn Bhd in enforcing payment.',
+    LEFT, doc.y, { width: WIDTH }
+  );
+  doc.moveDown(0.5);
+  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(NAVY).text('Account Name: AEC Sdn Bhd', LEFT, doc.y);
+  doc.font('Helvetica').fontSize(8.5).fillColor('#000');
+  doc.text('BIBD Account: 00-001-01-0019720');
+  doc.text('Baiduri Account: 01-00-1102888-38');
+  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(NAVY).text('AEC Service Centre: ', LEFT, doc.y, { continued: true });
+  doc.font('Helvetica').fillColor('#000').text('2449431 / 8349431 / 8369431 / 8728726');
+  doc.moveDown(0.8);
+  doc.fillColor('#000');
 
   if (report.complaint_description) {
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#0b3d63').text('Nature of Complaint (as reported)');

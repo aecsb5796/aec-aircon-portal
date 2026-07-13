@@ -189,7 +189,11 @@ CREATE TABLE IF NOT EXISTS customer_blocklist (
     // Set once the Head routes an approved report to the Accounts
     // department for invoicing. From this point on the technician can no
     // longer edit the report.
-    'accounts_sent_at'
+    'accounts_sent_at',
+    // Discount applied to the job's Amount Charged, set by the Head of
+    // Department when reviewing the report. Shown as its own line (Sub
+    // Total / Discount / Net Total) on the invoice-style PDF report.
+    'discount'
   ];
   for (const col of newColumns) {
     try {
