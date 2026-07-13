@@ -288,6 +288,27 @@ app.put('/api/jobs/:id/scheduler-edit', requireAuth, requireRole('scheduler'), a
   }
 });
 
+// Head: approve a newly-assigned job so it becomes visible/startable for
+// the technician. Every job created by a scheduler starts out unapproved
+// (head_approved_at is NULL) — the Head of Department must review and
+// approve it here first, before the technician is allowed to open/start
+// the work. See the matching check in POST /api/reports/:id/complete below.
+app.post('/api/jobs/:id/approve', requireAuth, requireRole('head'), async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    if (row.cancelled_at) return res.status(400).json({ error: 'This job has been cancelled.' });
+    if (row.status !== 'assigned') {
+      return res.status(400).json({ error: 'Only a newly assigned job awaiting approval can be approved here.' });
+    }
+    await db.prepare("UPDATE reports SET head_approved_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to approve job assignment' });
+  }
+});
+
 // ---------- Report routes ----------
 
 // Create report (technician, ad-hoc / walk-in job with no scheduler involved)
@@ -362,6 +383,7 @@ app.post('/api/reports/:id/complete', requireAuth, requireRole('technician'), up
     if (row.technician_id !== req.session.user.id) return res.status(403).json({ error: 'Forbidden' });
     if (row.cancelled_at) return res.status(400).json({ error: 'This job has been cancelled by the scheduler.' });
     if (row.status !== 'assigned') return res.status(400).json({ error: 'This job has already been completed' });
+    if (!row.head_approved_at) return res.status(400).json({ error: 'This job is awaiting Head of Department approval and cannot be started yet.' });
 
     const b = req.body;
     if (!b.date_started || !b.date_finished) {

@@ -198,7 +198,13 @@ CREATE TABLE IF NOT EXISTS customer_blocklist (
     // How the customer paid — 'cash', 'bank_transfer', or 'check' — ticked
     // by whoever is filling in the amount (Scheduler or Technician). Shown
     // on the invoice-style PDF report alongside the company's bank details.
-    'payment_method'
+    'payment_method',
+    // Set once the Head of Department reviews and approves a newly-assigned
+    // job. While this is NULL, the job sits in the Head's "Pending Job
+    // Approvals" queue and the technician is not allowed to open/start it —
+    // see the head_approval_backfill_v1 migration below and the
+    // /api/jobs/:id/approve route.
+    'head_approved_at'
   ];
   for (const col of newColumns) {
     try {
@@ -206,6 +212,19 @@ CREATE TABLE IF NOT EXISTS customer_blocklist (
     } catch (e) {
       // Column already exists — fine.
     }
+  }
+
+  // One-time migration: back-fill head_approved_at for every row that
+  // existed before this approval-gate feature shipped, so jobs already
+  // assigned/in-progress don't suddenly get locked out of the technician's
+  // "Start / Complete" button. Only newly-created jobs (created after this
+  // migration has run once) start out unapproved and require the Head to
+  // approve them before the technician can open them. Guarded by
+  // schema_meta so it only ever runs once per database.
+  const headApprovalMigration = await db.prepare("SELECT value FROM schema_meta WHERE key = ?").get('head_approval_backfill_v1');
+  if (!headApprovalMigration) {
+    await db.exec("UPDATE reports SET head_approved_at = created_at WHERE head_approved_at IS NULL");
+    await db.prepare("INSERT INTO schema_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run('head_approval_backfill_v1', '1');
   }
 
   // Remove old demo accounts that have been replaced (safe no-op if they
