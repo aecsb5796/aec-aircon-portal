@@ -7,6 +7,8 @@ const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
+const ExcelJS = require('exceljs');
+const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } = require('docx');
 const { db, ready } = require('./datastore6');
 const TursoSessionStore = require('./session-store');
 
@@ -59,6 +61,14 @@ function requireAuth(req, res, next) {
 function requireRole(role) {
   return (req, res, next) => {
     if (!req.session.user || req.session.user.role !== role) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    next();
+  };
+}
+function requireAnyRole(...roles) {
+  return (req, res, next) => {
+    if (!req.session.user || !roles.includes(req.session.user.role)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     next();
@@ -117,6 +127,49 @@ app.get('/api/technicians', requireAuth, async (req, res) => {
   }
 });
 
+// ---------- Customer blocklist ----------
+// Visible to Head (who manages it) and Scheduler (who needs to see the
+// warning while creating a new job). Tags persist independently of any one
+// report until the Head removes them.
+app.get('/api/blocklist', requireAuth, requireAnyRole('head', 'scheduler'), async (req, res) => {
+  try {
+    const rows = await db.prepare('SELECT * FROM customer_blocklist ORDER BY tagged_at DESC').all();
+    res.json({ blocklist: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load blocklist' });
+  }
+});
+
+app.post('/api/blocklist', requireAuth, requireRole('head'), async (req, res) => {
+  try {
+    const b = req.body;
+    const name = (b.customer_name || '').trim();
+    const phone = (b.customer_phone || '').trim();
+    const address = (b.customer_address || '').trim();
+    if (!name && !phone && !address) {
+      return res.status(400).json({ error: 'At least one of customer name, phone, or address is required' });
+    }
+    const info = await db.prepare(`INSERT INTO customer_blocklist
+      (customer_name, customer_phone, customer_address, reason, tagged_by)
+      VALUES (?,?,?,?,?)`).run(name, phone, address, b.reason || '', req.session.user.name);
+    res.json({ ok: true, id: info.lastInsertRowid });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to blocklist customer' });
+  }
+});
+
+app.delete('/api/blocklist/:id', requireAuth, requireRole('head'), async (req, res) => {
+  try {
+    await db.prepare('DELETE FROM customer_blocklist WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to remove from blocklist' });
+  }
+});
+
 // ---------- Scheduler: create a job assignment ----------
 app.post('/api/jobs', requireAuth, requireRole('scheduler'), async (req, res) => {
   try {
@@ -168,6 +221,66 @@ app.post('/api/jobs', requireAuth, requireRole('scheduler'), async (req, res) =>
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create job' });
+  }
+});
+
+// Scheduler: cancel a job — only while it's still unstarted ('assigned'),
+// i.e. before the technician has submitted a completed report. A reason is
+// required.
+app.post('/api/jobs/:id/cancel', requireAuth, requireRole('scheduler'), async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    if (row.assigned_by !== req.session.user.id) return res.status(403).json({ error: 'Forbidden' });
+    if (row.cancelled_at) return res.status(400).json({ error: 'This job is already cancelled' });
+    if (row.status !== 'assigned') {
+      return res.status(400).json({ error: 'This job can no longer be cancelled — the technician has already submitted a report for it.' });
+    }
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A cancellation reason is required' });
+    await db.prepare("UPDATE reports SET cancelled_at = datetime('now'), cancel_reason = ?, updated_at = datetime('now') WHERE id = ?").run(reason, req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to cancel job' });
+  }
+});
+
+// Scheduler: edit an already-assigned job — technician, address, nature of
+// complaint, amount, and preferred service date only. Allowed only while
+// the job is still 'assigned' (before the technician submits).
+app.put('/api/jobs/:id/scheduler-edit', requireAuth, requireRole('scheduler'), async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    if (row.assigned_by !== req.session.user.id) return res.status(403).json({ error: 'Forbidden' });
+    if (row.cancelled_at) return res.status(400).json({ error: 'This job has been cancelled' });
+    if (row.status !== 'assigned') {
+      return res.status(400).json({ error: 'This job can no longer be edited by the scheduler — the technician has already submitted a report for it.' });
+    }
+    const b = req.body;
+    const updates = [];
+    const values = [];
+    let technicianName = row.technician_name;
+    if (b.technician_id !== undefined && String(b.technician_id) !== String(row.technician_id)) {
+      const tech = await db.prepare("SELECT * FROM users WHERE id = ? AND role = 'technician'").get(b.technician_id);
+      if (!tech) return res.status(400).json({ error: 'Selected technician not found' });
+      technicianName = tech.name;
+      updates.push('technician_id = ?', 'technician_name = ?');
+      values.push(tech.id, tech.name);
+    }
+    if (b.customer_address !== undefined) { updates.push('customer_address = ?'); values.push(b.customer_address); }
+    if (b.complaint_description !== undefined) { updates.push('complaint_description = ?'); values.push(b.complaint_description); }
+    if (b.amount !== undefined) { updates.push('amount = ?'); values.push(b.amount); }
+    if (b.service_date !== undefined) { updates.push('service_date = ?'); values.push(b.service_date); }
+    if (!updates.length) return res.json({ ok: true });
+    updates.push("updated_at = datetime('now')");
+    values.push(req.params.id);
+    await db.prepare(`UPDATE reports SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    res.json({ ok: true, technician_name: technicianName });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save changes' });
   }
 });
 
@@ -241,6 +354,7 @@ app.post('/api/reports/:id/complete', requireAuth, requireRole('technician'), up
     const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Not found' });
     if (row.technician_id !== req.session.user.id) return res.status(403).json({ error: 'Forbidden' });
+    if (row.cancelled_at) return res.status(400).json({ error: 'This job has been cancelled by the scheduler.' });
     if (row.status !== 'assigned') return res.status(400).json({ error: 'This job has already been completed' });
 
     const b = req.body;
@@ -304,7 +418,7 @@ app.post('/api/reports/:id/complete', requireAuth, requireRole('technician'), up
 app.get('/api/reports', requireAuth, async (req, res) => {
   try {
     let rows;
-    if (req.session.user.role === 'head') {
+    if (req.session.user.role === 'head' || req.session.user.role === 'account') {
       rows = await db.prepare('SELECT * FROM reports ORDER BY created_at DESC').all();
     } else if (req.session.user.role === 'scheduler') {
       rows = await db.prepare('SELECT * FROM reports WHERE assigned_by = ? ORDER BY created_at DESC').all(req.session.user.id);
@@ -383,14 +497,93 @@ app.put('/api/reports/:id', requireAuth, requireRole('head'), async (req, res) =
   }
 });
 
+// Technician: edit a report they've already submitted. Only a limited set
+// of fields (amount, address, unit(s) serviced, contact number) — allowed
+// any time after submission, but locked once Accounts has been sent the
+// report for invoicing. If the report was sent back by Head with a reject
+// reason, saving an edit here counts as fixing and resubmitting it, so the
+// reject reason is cleared and it re-enters Head's review queue.
+app.put('/api/reports/:id/technician-edit', requireAuth, requireRole('technician'), async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    if (row.technician_id !== req.session.user.id) return res.status(403).json({ error: 'Forbidden' });
+    if (row.status === 'assigned') return res.status(400).json({ error: 'Submit the report first before editing it.' });
+    if (row.cancelled_at) return res.status(400).json({ error: 'This job has been cancelled.' });
+    if (row.accounts_sent_at) return res.status(400).json({ error: 'This report has already been sent to Accounts and can no longer be edited.' });
+
+    const b = req.body;
+    const updates = [];
+    const values = [];
+    if (b.amount !== undefined) { updates.push('amount = ?'); values.push(b.amount); }
+    if (b.customer_address !== undefined) { updates.push('customer_address = ?'); values.push(b.customer_address); }
+    if (b.customer_phone !== undefined) { updates.push('customer_phone = ?'); values.push(b.customer_phone); }
+    if (b.units_json !== undefined) { updates.push('units_json = ?'); values.push(b.units_json); }
+    if (!updates.length) return res.json({ ok: true });
+    // Editing after a rejection is treated as "fixed, please look again".
+    if (row.reject_reason) { updates.push('reject_reason = NULL'); }
+    updates.push("updated_at = datetime('now')");
+    values.push(req.params.id);
+    await db.prepare(`UPDATE reports SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save changes' });
+  }
+});
+
 // Approve report (head only)
 app.post('/api/reports/:id/approve', requireAuth, requireRole('head'), async (req, res) => {
   try {
-    await db.prepare("UPDATE reports SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    if (row.cancelled_at) return res.status(400).json({ error: 'This job has been cancelled.' });
+    await db.prepare("UPDATE reports SET status = 'approved', reject_reason = NULL, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to approve report' });
+  }
+});
+
+// Reject report (head only) — sends it back to the technician with a
+// required reason. The technician can then edit it (see technician-edit
+// above), which automatically clears the reason and puts it back in front
+// of Head for another look.
+app.post('/api/reports/:id/reject', requireAuth, requireRole('head'), async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    if (row.cancelled_at) return res.status(400).json({ error: 'This job has been cancelled.' });
+    if (!['submitted', 'reviewed'].includes(row.status)) {
+      return res.status(400).json({ error: 'Only a submitted report awaiting review can be rejected.' });
+    }
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to reject a report.' });
+    await db.prepare("UPDATE reports SET reject_reason = ?, updated_at = datetime('now') WHERE id = ?").run(reason, req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to reject report' });
+  }
+});
+
+// Send an approved report to the Accounts department for invoicing (head
+// only). This is a separate step from emailing the customer, and is the
+// point at which the technician is locked out of further edits.
+app.post('/api/reports/:id/send-to-accounts', requireAuth, requireRole('head'), async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    if (row.status !== 'approved') {
+      return res.status(400).json({ error: 'Only an approved report can be sent to Accounts.' });
+    }
+    if (row.accounts_sent_at) return res.status(400).json({ error: 'This report has already been sent to Accounts.' });
+    await db.prepare("UPDATE reports SET accounts_sent_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to send report to Accounts' });
   }
 });
 
@@ -432,7 +625,6 @@ function renderReportPdf(doc, report) {
   line('Address:', report.customer_address);
   line('Phone:', report.customer_phone);
   line('Email:', report.customer_email);
-  line('Unit Location:', report.unit_location);
   doc.moveDown(0.5);
 
   let units = [];
@@ -441,7 +633,7 @@ function renderReportPdf(doc, report) {
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#0b3d63').text('Unit(s) Serviced');
     doc.fillColor('#000').font('Helvetica').fontSize(10);
     units.forEach((u, i) => {
-      doc.text(`${i + 1}. Model: ${u.model || '-'}   Serial No.: ${u.serial || '-'}   Operating Pressure (PSI): ${u.psi || '-'}   Current (Ampere): ${u.ampere || '-'}`);
+      doc.text(`${i + 1}. Location: ${u.location || '-'}   Model: ${u.model || '-'}   Serial No.: ${u.serial || '-'}   Operating Pressure (PSI): ${u.psi || '-'}   Current (Ampere): ${u.ampere || '-'}`);
     });
     doc.moveDown(0.5);
   }
@@ -566,6 +758,139 @@ function renderReportPdf(doc, report) {
   doc.moveDown(0.5);
   doc.fontSize(8).fillColor('#888').text(`Generated by AEC Sdn Bhd Service Portal on ${new Date().toISOString().slice(0,10)}`, { align: 'center' });
 }
+
+// ---------- Excel / Word exports (Accounts department) ----------
+function unitsSummary(unitsJson) {
+  let units = [];
+  try { units = JSON.parse(unitsJson || '[]'); } catch (e) {}
+  return units.map((u, i) => `${i + 1}. ${u.location ? u.location + ' - ' : ''}${u.model || '-'} (SN ${u.serial || '-'})`).join('; ');
+}
+
+async function renderReportsXlsx(rows) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'AEC Sdn Bhd Service Portal';
+  const sheet = wb.addWorksheet('Service Reports');
+  sheet.columns = [
+    { header: 'Job Ref', key: 'job_ref', width: 12 },
+    { header: 'Status', key: 'status', width: 12 },
+    { header: 'Service Date', key: 'service_date', width: 14 },
+    { header: 'Customer Name', key: 'customer_name', width: 24 },
+    { header: 'Phone', key: 'customer_phone', width: 16 },
+    { header: 'Address', key: 'customer_address', width: 30 },
+    { header: 'Technician', key: 'technician_name', width: 18 },
+    { header: 'Unit(s) Serviced', key: 'units', width: 40 },
+    { header: 'Amount (BND)', key: 'amount', width: 14 },
+    { header: 'Sent to Accounts', key: 'accounts_sent_at', width: 18 },
+    { header: 'Emailed to Customer', key: 'sent_at', width: 18 },
+    { header: 'Cancelled', key: 'cancelled_at', width: 12 }
+  ];
+  sheet.getRow(1).font = { bold: true };
+  rows.forEach((r) => {
+    sheet.addRow({
+      job_ref: r.job_ref,
+      status: r.cancelled_at ? 'cancelled' : r.status,
+      service_date: r.service_date || '',
+      customer_name: r.customer_name || '',
+      customer_phone: r.customer_phone || '',
+      customer_address: r.customer_address || '',
+      technician_name: r.technician_name || '',
+      units: unitsSummary(r.units_json),
+      amount: r.amount || '',
+      accounts_sent_at: r.accounts_sent_at || '',
+      sent_at: r.sent_at || '',
+      cancelled_at: r.cancelled_at || ''
+    });
+  });
+  return wb.xlsx.writeBuffer();
+}
+
+async function renderReportDocx(report) {
+  let units = [];
+  try { units = JSON.parse(report.units_json || '[]'); } catch (e) {}
+
+  const cell = (text, opts) => new TableCell({
+    width: { size: 50, type: WidthType.PERCENTAGE },
+    children: [new Paragraph({ children: [new TextRun({ text: text || '-', bold: !!(opts && opts.bold) })] })]
+  });
+  const row = (label, value) => new TableRow({ children: [cell(label, { bold: true }), cell(value)] });
+
+  const children = [
+    new Paragraph({ text: 'AEC Sdn Bhd', heading: HeadingLevel.TITLE }),
+    new Paragraph({ text: 'Air Conditioning Sales, Installation & Maintenance Services — Brunei Darussalam' }),
+    new Paragraph({ text: '' }),
+    new Paragraph({ text: `AIR-CONDITIONING SERVICE REPORT — ${report.job_ref}`, heading: HeadingLevel.HEADING_1 }),
+    new Paragraph({ text: '' }),
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        row('Service Date', report.service_date),
+        row('Technician', report.technician_name),
+        row('Amount Charged (BND)', report.amount),
+        row('Customer Name', report.customer_name),
+        row('Address', report.customer_address),
+        row('Phone', report.customer_phone),
+        row('Email', report.customer_email)
+      ]
+    }),
+    new Paragraph({ text: '' }),
+    new Paragraph({ text: 'Unit(s) Serviced', heading: HeadingLevel.HEADING_2 })
+  ];
+
+  if (units.length) {
+    units.forEach((u, i) => {
+      children.push(new Paragraph({ text: `${i + 1}. Location: ${u.location || '-'}   Model: ${u.model || '-'}   Serial No.: ${u.serial || '-'}   Operating Pressure (PSI): ${u.psi || '-'}   Current (Ampere): ${u.ampere || '-'}` }));
+    });
+  } else {
+    children.push(new Paragraph({ text: 'No units recorded.' }));
+  }
+
+  children.push(new Paragraph({ text: '' }));
+  children.push(new Paragraph({ text: 'Work Performed & Findings', heading: HeadingLevel.HEADING_2 }));
+  children.push(new Paragraph({ text: report.work_performed || '-' }));
+  children.push(new Paragraph({ text: 'Findings: ' + (report.findings || '-') }));
+
+  if (report.head_remarks) {
+    children.push(new Paragraph({ text: '' }));
+    children.push(new Paragraph({ text: 'Company Remarks', heading: HeadingLevel.HEADING_2 }));
+    children.push(new Paragraph({ text: report.head_remarks }));
+  }
+
+  children.push(new Paragraph({ text: '' }));
+  children.push(new Paragraph({ text: `Generated by AEC Sdn Bhd Service Portal on ${new Date().toISOString().slice(0, 10)}` }));
+
+  const doc = new Document({ sections: [{ children }] });
+  return Packer.toBuffer(doc);
+}
+
+app.get('/api/reports/:id/export.docx', requireAuth, requireAnyRole('head', 'account'), async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    const buf = await renderReportDocx(row);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${row.job_ref}.docx"`);
+    res.send(buf);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate Word document' });
+  }
+});
+
+// NOTE: registered as /api/export/reports.xlsx (not /api/reports/export.xlsx)
+// so it can never be shadowed by the "GET /api/reports/:id" route above,
+// which would otherwise treat "export.xlsx" as an :id value.
+app.get('/api/export/reports.xlsx', requireAuth, requireAnyRole('head', 'account'), async (req, res) => {
+  try {
+    const rows = await db.prepare('SELECT * FROM reports ORDER BY created_at DESC').all();
+    const buf = await renderReportsXlsx(rows);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="AEC-service-reports.xlsx"');
+    res.send(buf);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate Excel export' });
+  }
+});
 
 app.get('/api/reports/:id/pdf', requireAuth, async (req, res) => {
   try {

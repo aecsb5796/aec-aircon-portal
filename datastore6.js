@@ -102,7 +102,54 @@ CREATE TABLE IF NOT EXISTS sessions (
   data TEXT NOT NULL,
   expires_at INTEGER NOT NULL
 );
+
+-- Tracks one-time schema migrations that can't be expressed as a plain
+-- "ALTER TABLE ADD COLUMN" (e.g. rebuilding a table to relax a CHECK
+-- constraint), so they only ever run once even though init() runs on every
+-- server startup/redeploy.
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
+
+-- Customers the Head of Department has flagged as blocklisted. Kept as a
+-- standalone list (independent of any one report) so the tag persists and
+-- shows up again any time a matching name/phone/address is entered on a new
+-- job, until the Head explicitly removes it.
+CREATE TABLE IF NOT EXISTS customer_blocklist (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_name TEXT,
+  customer_phone TEXT,
+  customer_address TEXT,
+  reason TEXT,
+  tagged_by TEXT,
+  tagged_at TEXT DEFAULT (datetime('now'))
+);
 `);
+
+  // One-time migration: the original users table had
+  // CHECK(role IN ('technician','head','scheduler')), which would reject
+  // inserting the new 'account' role. Rebuild the table without that
+  // constraint (role validity is enforced in application code instead).
+  // Guarded by schema_meta so it only runs once per database.
+  const usersMigration = await db.prepare("SELECT value FROM schema_meta WHERE key = ?").get('users_role_account_v1');
+  if (!usersMigration) {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS users_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      INSERT INTO users_new (id, username, password_hash, name, role, created_at)
+        SELECT id, username, password_hash, name, role, created_at FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_new RENAME TO users;
+    `);
+    await db.prepare("INSERT INTO schema_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run('users_role_account_v1', '1');
+  }
 
   // Sessions used to live only in the server process's memory
   // (express-session's default MemoryStore), so everyone got logged out
@@ -122,8 +169,19 @@ CREATE TABLE IF NOT EXISTS sessions (
     // rather than dropped, consistent with this project's migration style.
     'unit_model', 'unit_serial', 'operating_pressure_psi', 'current_ampere',
     // Repeatable list of units serviced on this job — JSON array of
-    // { model, serial, psi, ampere }.
-    'units_json'
+    // { model, location, serial, psi, ampere }.
+    'units_json',
+    // Scheduler cancellation (only ever set while a job is still 'assigned',
+    // i.e. before the technician has submitted a completed report).
+    'cancel_reason', 'cancelled_at',
+    // Head rejection during review — sent back to the technician with a
+    // reason; cleared automatically once the technician edits and
+    // resubmits.
+    'reject_reason',
+    // Set once the Head routes an approved report to the Accounts
+    // department for invoicing. From this point on the technician can no
+    // longer edit the report.
+    'accounts_sent_at'
   ];
   for (const col of newColumns) {
     try {
@@ -156,7 +214,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     { username: 'ujang', password: 'ujangaec', name: 'Ujang', role: 'technician' },
     { username: 'hariyanto', password: 'hariaec', name: 'Hariyanto', role: 'technician' },
     { username: 'aecnora', password: 'aec5796', name: 'Nora (Scheduler)', role: 'scheduler' },
-    { username: 'head', password: 'head5796', name: 'Hj. Rahman (Head of Dept)', role: 'head' }
+    { username: 'head', password: 'head5796', name: 'Hj. Rahman (Head of Dept)', role: 'head' },
+    { username: 'account', password: '5796', name: 'Accounts Department', role: 'account' }
   ];
 
   const upsert = db.prepare(`
