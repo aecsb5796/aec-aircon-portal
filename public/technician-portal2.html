@@ -92,7 +92,7 @@
       </div>
 
       <div class="card">
-        <h2>Unit(s) Serviced <span class="muted" style="font-weight:400;">(optional)</span></h2>
+        <h2>Unit(s) Serviced <span class="muted" style="font-weight:400;">(required)</span></h2>
         <div id="unitsList"></div>
         <button type="button" class="btn secondary small" onclick="addUnitRow()">+ Add Unit</button>
       </div>
@@ -286,11 +286,11 @@ function addUnitRow(prefill) {
   row.className = 'unit-row';
   row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px;';
   row.innerHTML = `
-    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Unit Model</label><input type="text" class="unit-model" style="margin-bottom:0;"></div>
-    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Serial Number</label><input type="text" class="unit-serial" style="margin-bottom:0;"></div>
-    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Operating Pressure (PSI)</label><input type="text" class="unit-psi" style="margin-bottom:0;"></div>
-    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Current (Ampere)</label><input type="text" class="unit-ampere" style="margin-bottom:0;"></div>
-    <button type="button" class="btn secondary small" onclick="this.parentElement.remove()">Remove</button>`;
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Unit Model</label><input type="text" class="unit-model" style="margin-bottom:0;" required></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Serial Number</label><input type="text" class="unit-serial" style="margin-bottom:0;" required></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Operating Pressure (PSI)</label><input type="text" class="unit-psi" style="margin-bottom:0;" required></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Current (Ampere)</label><input type="text" class="unit-ampere" style="margin-bottom:0;" required></div>
+    <button type="button" class="btn secondary small" onclick="removeUnitRow(this)">Remove</button>`;
   list.appendChild(row);
   if (prefill) {
     row.querySelector('.unit-model').value = prefill.model || '';
@@ -298,6 +298,15 @@ function addUnitRow(prefill) {
     row.querySelector('.unit-psi').value = prefill.psi || '';
     row.querySelector('.unit-ampere').value = prefill.ampere || '';
   }
+}
+
+function removeUnitRow(btn) {
+  const list = document.getElementById('unitsList');
+  if (list.querySelectorAll('.unit-row').length <= 1) {
+    toast('At least one unit must be filled in.', true);
+    return;
+  }
+  btn.parentElement.remove();
 }
 
 function addPartRow() {
@@ -377,6 +386,20 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
     return;
   }
 
+  // Unit(s) Serviced is required: at least one unit row, and every row must
+  // have Model, Serial Number, Operating Pressure, and Current filled in.
+  const unitRows = Array.from(document.querySelectorAll('.unit-row'));
+  const unitsCheck = unitRows.map(row => ({
+    model: row.querySelector('.unit-model').value.trim(),
+    serial: row.querySelector('.unit-serial').value.trim(),
+    psi: row.querySelector('.unit-psi').value.trim(),
+    ampere: row.querySelector('.unit-ampere').value.trim()
+  }));
+  if (unitsCheck.length === 0 || unitsCheck.some(u => !u.model || !u.serial || !u.psi || !u.ampere)) {
+    toast('Please fill in Unit Model, Serial Number, Operating Pressure, and Current for every unit.', true);
+    return;
+  }
+
   const btn = document.getElementById('submitBtn');
   btn.disabled = true;
   document.getElementById('submitStatus').textContent = 'Submitting...';
@@ -388,12 +411,7 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
     name: row.querySelector('.part-name').value,
     qty: row.querySelector('.part-qty').value
   })).filter(p => p.name);
-  const units = Array.from(document.querySelectorAll('.unit-row')).map(row => ({
-    model: row.querySelector('.unit-model').value,
-    serial: row.querySelector('.unit-serial').value,
-    psi: row.querySelector('.unit-psi').value,
-    ampere: row.querySelector('.unit-ampere').value
-  })).filter(u => u.model || u.serial || u.psi || u.ampere);
+  const units = unitsCheck;
 
   // Job Sheet No. is never submitted by the technician — it is assigned by
   // the scheduler and can only be changed by the head of department.
