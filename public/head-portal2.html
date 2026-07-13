@@ -112,8 +112,11 @@
       <textarea id="e_work_performed"></textarea>
       <label>Findings / Diagnosis</label>
       <textarea id="e_findings"></textarea>
-      <label>Amount Charged (BND)</label>
-      <input type="number" id="e_amount" step="0.01" min="0">
+      <div class="grid2">
+        <div><label>Amount Charged (BND)</label><input type="number" id="e_amount" step="0.01" min="0" oninput="updateNetTotal()"></div>
+        <div><label>Discount (BND)</label><input type="number" id="e_discount" step="0.01" min="0" oninput="updateNetTotal()"></div>
+      </div>
+      <div class="muted" id="e_net_total" style="font-weight:600;"></div>
     </div>
 
     <div class="card">
@@ -320,6 +323,8 @@ async function openReport(id) {
   document.getElementById('e_work_performed').value = r.work_performed || '';
   document.getElementById('e_findings').value = r.findings || '';
   document.getElementById('e_amount').value = r.amount || '';
+  document.getElementById('e_discount').value = r.discount || '';
+  updateNetTotal();
   document.getElementById('e_technician_notes').value = r.technician_notes || '';
   document.getElementById('e_recommendations').value = r.recommendations || '';
   document.getElementById('e_date_started').value = r.date_started || '';
@@ -384,6 +389,15 @@ function addEUnitRow(prefill) {
   }
 }
 
+// Recomputes Net Total (Amount Charged minus Discount) shown just below
+// the two fields, so the Head can see the invoice total that will appear
+// on the PDF report before saving.
+function updateNetTotal() {
+  const amount = parseFloat(document.getElementById('e_amount').value) || 0;
+  const discount = parseFloat(document.getElementById('e_discount').value) || 0;
+  document.getElementById('e_net_total').textContent = 'Net Total (BND): ' + (amount - discount).toFixed(2);
+}
+
 function toast(msg, isErr) {
   const t = document.createElement('div');
   t.className = 'toast' + (isErr ? ' err' : '');
@@ -412,6 +426,7 @@ async function saveEdits() {
     work_performed: document.getElementById('e_work_performed').value,
     findings: document.getElementById('e_findings').value,
     amount: document.getElementById('e_amount').value,
+    discount: document.getElementById('e_discount').value,
     technician_notes: document.getElementById('e_technician_notes').value,
     recommendations: document.getElementById('e_recommendations').value,
     date_started: document.getElementById('e_date_started').value,
