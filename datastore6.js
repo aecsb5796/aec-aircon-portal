@@ -190,10 +190,15 @@ CREATE TABLE IF NOT EXISTS customer_blocklist (
     // department for invoicing. From this point on the technician can no
     // longer edit the report.
     'accounts_sent_at',
-    // Discount applied to the job's Amount Charged, set by the Head of
-    // Department when reviewing the report. Shown as its own line (Sub
-    // Total / Discount / Net Total) on the invoice-style PDF report.
-    'discount'
+    // Discount applied to the job's Amount Charged. Settable by the
+    // Scheduler (at assignment), the Technician (at submission), and the
+    // Head of Department (at review) — the Net Total is recalculated from
+    // Amount Charged minus Discount everywhere it's shown.
+    'discount',
+    // How the customer paid — 'cash', 'bank_transfer', or 'check' — ticked
+    // by whoever is filling in the amount (Scheduler or Technician). Shown
+    // on the invoice-style PDF report alongside the company's bank details.
+    'payment_method'
   ];
   for (const col of newColumns) {
     try {

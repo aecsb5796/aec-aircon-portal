@@ -201,8 +201,8 @@ app.post('/api/jobs', requireAuth, requireRole('scheduler'), async (req, res) =>
     const stmt = db.prepare(`INSERT INTO reports
       (job_ref, technician_id, technician_name, service_date, service_type,
        customer_name, customer_address, customer_phone, complaint_description,
-       amount, assigned_by, status)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+       amount, discount, payment_method, assigned_by, status)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     const info = await stmt.run(
       jobRef,
       tech.id,
@@ -214,6 +214,8 @@ app.post('/api/jobs', requireAuth, requireRole('scheduler'), async (req, res) =>
       customerPhone,
       b.complaint_description,
       b.amount || '',
+      b.discount || '',
+      b.payment_method || '',
       req.session.user.id,
       'assigned'
     );
@@ -272,6 +274,8 @@ app.put('/api/jobs/:id/scheduler-edit', requireAuth, requireRole('scheduler'), a
     if (b.customer_address !== undefined) { updates.push('customer_address = ?'); values.push(b.customer_address); }
     if (b.complaint_description !== undefined) { updates.push('complaint_description = ?'); values.push(b.complaint_description); }
     if (b.amount !== undefined) { updates.push('amount = ?'); values.push(b.amount); }
+    if (b.discount !== undefined) { updates.push('discount = ?'); values.push(b.discount); }
+    if (b.payment_method !== undefined) { updates.push('payment_method = ?'); values.push(b.payment_method); }
     if (b.service_date !== undefined) { updates.push('service_date = ?'); values.push(b.service_date); }
     if (!updates.length) return res.json({ ok: true });
     updates.push("updated_at = datetime('now')");
@@ -303,11 +307,11 @@ app.post('/api/reports', requireAuth, requireRole('technician'), upload.array('p
       (job_ref, technician_id, technician_name, service_date, service_type,
        customer_name, customer_address, customer_email, customer_phone,
        unit_location, units_json,
-       written_name, team_members, amount,
+       written_name, team_members, amount, discount, payment_method,
        checklist_json, work_performed, findings,
        parts_json, photos_json, technician_notes, recommendations, date_started, date_finished,
        technician_signature, customer_signature, customer_ack, status)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
     // Job Reference is auto-assigned by the system (genJobRef above) —
     // technicians never set it themselves, even on ad-hoc/walk-in reports.
@@ -326,6 +330,8 @@ app.post('/api/reports', requireAuth, requireRole('technician'), upload.array('p
       b.written_name || '',
       b.team_members || '',
       b.amount || '',
+      b.discount || '',
+      b.payment_method || '',
       b.checklist_json || '[]',
       b.work_performed || '',
       b.findings || '',
@@ -375,7 +381,7 @@ app.post('/api/reports/:id/complete', requireAuth, requireRole('technician'), up
         service_date = ?, service_type = ?,
         customer_name = ?, customer_address = ?, customer_email = ?, customer_phone = ?,
         unit_location = ?, units_json = ?,
-        written_name = ?, team_members = ?, amount = ?,
+        written_name = ?, team_members = ?, amount = ?, discount = ?, payment_method = ?,
         checklist_json = ?, work_performed = ?, findings = ?,
         parts_json = ?, photos_json = ?, technician_notes = ?, recommendations = ?,
         date_started = ?, date_finished = ?, technician_signature = ?, customer_signature = ?, customer_ack = ?,
@@ -392,6 +398,8 @@ app.post('/api/reports/:id/complete', requireAuth, requireRole('technician'), up
       b.written_name || '',
       b.team_members || '',
       b.amount || '',
+      b.discount || '',
+      b.payment_method || '',
       b.checklist_json || '[]',
       b.work_performed || '',
       b.findings || '',
@@ -476,7 +484,7 @@ app.put('/api/reports/:id', requireAuth, requireRole('head'), async (req, res) =
 
     const fields = ['customer_name','customer_address','customer_email','customer_phone',
       'unit_location',
-      'complaint_description','job_ref','written_name','team_members','amount','discount',
+      'complaint_description','job_ref','written_name','team_members','amount','discount','payment_method',
       'work_performed','findings','technician_notes',
       'recommendations','date_started','date_finished','head_remarks','service_type','status'];
     const updates = [];
@@ -516,6 +524,8 @@ app.put('/api/reports/:id/technician-edit', requireAuth, requireRole('technician
     const updates = [];
     const values = [];
     if (b.amount !== undefined) { updates.push('amount = ?'); values.push(b.amount); }
+    if (b.discount !== undefined) { updates.push('discount = ?'); values.push(b.discount); }
+    if (b.payment_method !== undefined) { updates.push('payment_method = ?'); values.push(b.payment_method); }
     if (b.customer_address !== undefined) { updates.push('customer_address = ?'); values.push(b.customer_address); }
     if (b.customer_phone !== undefined) { updates.push('customer_phone = ?'); values.push(b.customer_phone); }
     if (b.units_json !== undefined) { updates.push('units_json = ?'); values.push(b.units_json); }
@@ -732,10 +742,22 @@ function renderReportPdf(doc, report) {
     LEFT, doc.y, { width: WIDTH }
   );
   doc.moveDown(0.5);
+
+  // Terms of Payment — ticks whichever method was recorded (Scheduler or
+  // Technician), so it's clear at a glance how the customer paid.
+  const paymentLabels = { cash: 'Cash', bank_transfer: 'Bank Transfer', check: 'Check' };
+  const paymentKey = (report.payment_method || '').toLowerCase();
+  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(NAVY).text('Terms of Payment:', LEFT, doc.y, { continued: true });
+  doc.font('Helvetica').fillColor('#000');
+  Object.entries(paymentLabels).forEach(([key, label], i) => {
+    doc.text('   ' + (paymentKey === key ? '[x] ' : '[ ] ') + label, { continued: i < Object.keys(paymentLabels).length - 1 });
+  });
+  doc.moveDown(0.4);
+
   doc.font('Helvetica-Bold').fontSize(8.5).fillColor(NAVY).text('Account Name: AEC Sdn Bhd', LEFT, doc.y);
   doc.font('Helvetica').fontSize(8.5).fillColor('#000');
   doc.text('BIBD Account: 00-001-01-0019720');
-  doc.text('Baiduri Account: 01-00-1102888-38');
+  doc.text('Baiduri Account: 01-00-110-288838');
   doc.font('Helvetica-Bold').fontSize(8.5).fillColor(NAVY).text('AEC Service Centre: ', LEFT, doc.y, { continued: true });
   doc.font('Helvetica').fillColor('#000').text('2449431 / 8349431 / 8369431 / 8728726');
   doc.moveDown(0.8);
