@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AEC Sdn Bhd - Accounts Department Portal</title>
+<link rel="stylesheet" href="/app-styles.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><img src="/img/logo.png" alt="AEC Sdn Bhd" class="brand-logo"><div class="brand-text"><strong>AEC Sdn Bhd</strong><span>Accounts Department Portal</span></div></div>
+  <div class="userbox">
+    <span id="userName"></span>
+    <button class="logout" onclick="logout()">Log Out</button>
+  </div>
+</div>
+<div class="container">
+
+  <div class="card">
+    <div class="flex-between">
+      <h2 style="border:none;margin:0;padding:0;">Service Reports for Invoicing</h2>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <select id="viewFilter" onchange="renderTable()">
+          <option value="accounts">Sent to Accounts only</option>
+          <option value="all">All reports</option>
+        </select>
+        <a class="btn secondary" href="/api/export/reports.xlsx" target="_blank">Export All to Excel</a>
+      </div>
+    </div>
+    <div class="muted" style="margin-bottom:8px;">Reports appear here once the Head of Department sends an approved report to Accounts for invoicing.</div>
+    <table class="list" id="reportsTable">
+      <thead><tr><th>Job Ref</th><th>Customer</th><th>Technician</th><th>Amount (BND)</th><th>Sent to Accounts</th><th>Status</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+let reportsCache = [];
+
+async function init() {
+  const me = await fetch('/api/me').then(r => r.json());
+  if (!me.user || me.user.role !== 'account') { window.location.href = '/'; return; }
+  document.getElementById('userName').textContent = me.user.name;
+  await loadReports();
+}
+
+async function loadReports() {
+  const data = await fetch('/api/reports').then(r => r.json());
+  reportsCache = data.reports || [];
+  renderTable();
+}
+
+function renderTable() {
+  const filter = document.getElementById('viewFilter').value;
+  const rows = reportsCache.filter(r => filter === 'all' || !!r.accounts_sent_at);
+  const tbody = document.querySelector('#reportsTable tbody');
+  tbody.innerHTML = rows.map(r => {
+    const statusLabel = r.cancelled_at ? 'cancelled' : (r.reject_reason ? 'rejected' : r.status);
+    return `
+    <tr>
+      <td>${r.job_ref}</td>
+      <td>${r.customer_name}</td>
+      <td>${r.technician_name}</td>
+      <td>${r.amount || '-'}</td>
+      <td>${r.accounts_sent_at || '-'}</td>
+      <td><span class="badge ${statusLabel}">${statusLabel}</span></td>
+      <td style="white-space:nowrap;">
+        <a class="btn secondary small" href="/api/reports/${r.id}/pdf" target="_blank">PDF</a>
+        <a class="btn secondary small" href="/api/reports/${r.id}/export.docx">Word</a>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="muted">No reports to show yet.</td></tr>';
+}
+
+function logout() {
+  fetch('/api/logout', { method: 'POST' }).then(() => window.location.href = '/');
+}
+
+init();
+</script>
+</body>
+</html>

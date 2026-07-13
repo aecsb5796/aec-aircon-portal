@@ -77,16 +77,8 @@
             <input type="tel" id="customer_phone">
           </div>
         </div>
-        <div class="grid2">
-          <div>
-            <label>Customer Email (for sending report)</label>
-            <input type="email" id="customer_email">
-          </div>
-          <div>
-            <label>Unit Location (e.g. Living Room, Office 2F)</label>
-            <input type="text" id="unit_location">
-          </div>
-        </div>
+        <label>Customer Email (for sending report)</label>
+        <input type="email" id="customer_email">
         <label>Customer Address / Site</label>
         <textarea id="customer_address"></textarea>
       </div>
@@ -186,13 +178,47 @@
   <div id="viewHistory" style="display:none;">
     <div class="card">
       <h2>My Submitted Reports</h2>
+      <div class="muted" style="margin-bottom:8px;">You can still edit the amount, address, unit(s) serviced, and contact number on a report after submitting it &mdash; until it's been sent to Accounts for invoicing.</div>
       <table class="list" id="historyTable">
-        <thead><tr><th>Job Ref</th><th>Date</th><th>Customer</th><th>Status</th></tr></thead>
+        <thead><tr><th>Job Ref</th><th>Date</th><th>Customer</th><th>Status</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
 
+</div>
+
+<!-- Post-submission edit panel: amount, address, unit(s) serviced, and
+     contact number only. Available any time after submission until the
+     report has been sent to Accounts for invoicing. If the report was sent
+     back by the Head with a reject reason, saving here also clears that
+     reason and puts it back in front of the Head. -->
+<div class="container" id="techEditWrap" style="display:none;">
+  <div class="card">
+    <div class="flex-between">
+      <h2 style="border:none;margin:0;padding:0;">Edit Report <span id="techEditJobRef"></span></h2>
+      <button class="btn secondary small" type="button" onclick="closeTechEdit()">Close</button>
+    </div>
+    <div class="muted err" id="techEditRejectBanner" style="display:none;background:#fdecea;border:1px solid #f1948a;border-radius:6px;padding:8px 10px;margin-bottom:10px;color:#922b21;"></div>
+    <div class="grid2">
+      <div>
+        <label>Amount Charged (BND)</label>
+        <input type="number" id="te_amount" step="0.01" min="0">
+      </div>
+      <div>
+        <label>Customer Phone</label>
+        <input type="tel" id="te_customer_phone">
+      </div>
+    </div>
+    <label>Customer Address / Site</label>
+    <textarea id="te_customer_address"></textarea>
+    <h2 style="margin-top:14px;">Unit(s) Serviced</h2>
+    <div id="te_unitsList"></div>
+    <button type="button" class="btn secondary small" onclick="addTechEditUnitRow()">+ Add Unit</button>
+    <div style="height:10px;"></div>
+    <button class="btn" type="button" onclick="saveTechEdit()">Save Changes</button>
+    <span class="muted" id="techEditStatus" style="margin-left:12px;"></span>
+  </div>
 </div>
 
 <script src="/signature.js"></script>
@@ -215,6 +241,7 @@ const DEFAULT_CHECKLIST = [
 let currentUser = null;
 let uploadedFiles = [];
 let completingJobId = null;
+let historyCache = [];
 
 async function init() {
   const me = await fetch('/api/me').then(r => r.json());
@@ -234,7 +261,7 @@ async function init() {
 
 async function loadAssigned() {
   const data = await fetch('/api/reports').then(r => r.json());
-  const rows = (data.reports || []).filter(r => r.status === 'assigned');
+  const rows = (data.reports || []).filter(r => r.status === 'assigned' && !r.cancelled_at);
   const tbody = document.querySelector('#assignedTable tbody');
   tbody.innerHTML = rows.map(r => `
     <tr>
@@ -280,12 +307,16 @@ function buildChecklist() {
     </div>`).join('');
 }
 
+// Unit rows: Unit Location is captured per unit (shown right beside Unit
+// Model) rather than as a single field for the whole job, since a job can
+// involve several units in different locations (e.g. Living Room, Office).
 function addUnitRow(prefill) {
   const list = document.getElementById('unitsList');
   const row = document.createElement('div');
   row.className = 'unit-row';
-  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px;';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px;';
   row.innerHTML = `
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Unit Location</label><input type="text" class="unit-location" style="margin-bottom:0;" placeholder="e.g. Living Room"></div>
     <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Unit Model</label><input type="text" class="unit-model" style="margin-bottom:0;" required></div>
     <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Serial Number</label><input type="text" class="unit-serial" style="margin-bottom:0;" required></div>
     <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Operating Pressure (PSI)</label><input type="text" class="unit-psi" style="margin-bottom:0;" required></div>
@@ -293,6 +324,7 @@ function addUnitRow(prefill) {
     <button type="button" class="btn secondary small" onclick="removeUnitRow(this)">Remove</button>`;
   list.appendChild(row);
   if (prefill) {
+    row.querySelector('.unit-location').value = prefill.location || '';
     row.querySelector('.unit-model').value = prefill.model || '';
     row.querySelector('.unit-serial').value = prefill.serial || '';
     row.querySelector('.unit-psi').value = prefill.psi || '';
@@ -352,14 +384,28 @@ function resetCompletingBanner() {
 
 async function loadHistory() {
   const data = await fetch('/api/reports').then(r => r.json());
+  historyCache = (data.reports || []).filter(r => r.status !== 'assigned');
   const tbody = document.querySelector('#historyTable tbody');
-  tbody.innerHTML = (data.reports || []).map(r => `
+  tbody.innerHTML = historyCache.map(r => {
+    let action;
+    if (r.cancelled_at) {
+      action = '<span class="muted">Cancelled</span>';
+    } else if (r.accounts_sent_at) {
+      action = '<span class="muted">Locked &mdash; sent to Accounts</span>';
+    } else if (r.reject_reason) {
+      action = `<button type="button" class="btn small" style="background:#c0392b;" onclick="openTechEdit(${r.id})">Rejected &mdash; Edit &amp; Resubmit</button>`;
+    } else {
+      action = `<button type="button" class="btn secondary small" onclick="openTechEdit(${r.id})">Edit</button>`;
+    }
+    return `
     <tr>
       <td>${r.job_ref}</td>
       <td>${r.service_date}</td>
       <td>${r.customer_name}</td>
-      <td><span class="badge ${r.status}">${r.status}</span></td>
-    </tr>`).join('') || '<tr><td colspan="4" class="muted">No reports submitted yet.</td></tr>';
+      <td><span class="badge ${r.cancelled_at ? 'cancelled' : r.status}">${r.cancelled_at ? 'cancelled' : r.status}</span></td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="muted">No reports submitted yet.</td></tr>';
 }
 
 function toast(msg, isErr) {
@@ -387,9 +433,11 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
   }
 
   // Unit(s) Serviced is required: at least one unit row, and every row must
-  // have Model, Serial Number, Operating Pressure, and Current filled in.
-  const unitRows = Array.from(document.querySelectorAll('.unit-row'));
+  // have Model, Serial Number, Operating Pressure, and Current filled in
+  // (Unit Location is optional).
+  const unitRows = Array.from(document.querySelectorAll('#unitsList .unit-row'));
   const unitsCheck = unitRows.map(row => ({
+    location: row.querySelector('.unit-location').value.trim(),
     model: row.querySelector('.unit-model').value.trim(),
     serial: row.querySelector('.unit-serial').value.trim(),
     psi: row.querySelector('.unit-psi').value.trim(),
@@ -421,7 +469,6 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
   fd.append('customer_name', document.getElementById('customer_name').value);
   fd.append('customer_phone', document.getElementById('customer_phone').value);
   fd.append('customer_email', document.getElementById('customer_email').value);
-  fd.append('unit_location', document.getElementById('unit_location').value);
   fd.append('customer_address', document.getElementById('customer_address').value);
   fd.append('units_json', JSON.stringify(units));
   fd.append('written_name', document.getElementById('written_name').value);
@@ -466,6 +513,91 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
   }
   btn.disabled = false;
 });
+
+// ---------- Post-submission edit (amount, address, units, phone) ----------
+let techEditingId = null;
+
+function addTechEditUnitRow(prefill) {
+  const list = document.getElementById('te_unitsList');
+  const row = document.createElement('div');
+  row.className = 'unit-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px;';
+  row.innerHTML = `
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Unit Location</label><input type="text" class="unit-location" style="margin-bottom:0;"></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Unit Model</label><input type="text" class="unit-model" style="margin-bottom:0;"></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Serial Number</label><input type="text" class="unit-serial" style="margin-bottom:0;"></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Operating Pressure (PSI)</label><input type="text" class="unit-psi" style="margin-bottom:0;"></div>
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Current (Ampere)</label><input type="text" class="unit-ampere" style="margin-bottom:0;"></div>
+    <button type="button" class="btn secondary small" onclick="this.parentElement.remove()">Remove</button>`;
+  list.appendChild(row);
+  if (prefill) {
+    row.querySelector('.unit-location').value = prefill.location || '';
+    row.querySelector('.unit-model').value = prefill.model || '';
+    row.querySelector('.unit-serial').value = prefill.serial || '';
+    row.querySelector('.unit-psi').value = prefill.psi || '';
+    row.querySelector('.unit-ampere').value = prefill.ampere || '';
+  }
+}
+
+function openTechEdit(id) {
+  const r = historyCache.find(x => x.id === id);
+  if (!r) return;
+  techEditingId = id;
+  document.getElementById('techEditJobRef').textContent = r.job_ref;
+  document.getElementById('te_amount').value = r.amount || '';
+  document.getElementById('te_customer_phone').value = r.customer_phone || '';
+  document.getElementById('te_customer_address').value = r.customer_address || '';
+  document.getElementById('te_unitsList').innerHTML = '';
+  let units = [];
+  try { units = JSON.parse(r.units_json || '[]'); } catch (e) {}
+  if (units.length) units.forEach(u => addTechEditUnitRow(u));
+  else addTechEditUnitRow();
+  const banner = document.getElementById('techEditRejectBanner');
+  if (r.reject_reason) {
+    banner.style.display = '';
+    banner.textContent = 'Rejected by Head of Department: ' + r.reject_reason + ' — fix the report below and save to resubmit for review.';
+  } else {
+    banner.style.display = 'none';
+  }
+  document.getElementById('techEditStatus').textContent = '';
+  document.getElementById('techEditWrap').style.display = '';
+  document.getElementById('techEditWrap').scrollIntoView({ behavior: 'smooth' });
+}
+
+function closeTechEdit() {
+  techEditingId = null;
+  document.getElementById('techEditWrap').style.display = 'none';
+}
+
+async function saveTechEdit() {
+  if (!techEditingId) return;
+  const units = Array.from(document.querySelectorAll('#te_unitsList .unit-row')).map(row => ({
+    location: row.querySelector('.unit-location').value.trim(),
+    model: row.querySelector('.unit-model').value.trim(),
+    serial: row.querySelector('.unit-serial').value.trim(),
+    psi: row.querySelector('.unit-psi').value.trim(),
+    ampere: row.querySelector('.unit-ampere').value.trim()
+  }));
+  const body = {
+    amount: document.getElementById('te_amount').value,
+    customer_phone: document.getElementById('te_customer_phone').value,
+    customer_address: document.getElementById('te_customer_address').value,
+    units_json: JSON.stringify(units)
+  };
+  try {
+    const res = await fetch('/api/reports/' + techEditingId + '/technician-edit', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save changes');
+    toast('Report updated.');
+    closeTechEdit();
+    loadHistory();
+  } catch (err) {
+    toast(err.message, true);
+    document.getElementById('techEditStatus').textContent = err.message;
+  }
+}
 
 function logout() {
   fetch('/api/logout', { method: 'POST' }).then(() => window.location.href = '/');

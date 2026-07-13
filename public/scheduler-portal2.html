@@ -39,6 +39,7 @@
           <input type="tel" id="customer_phone" required>
         </div>
       </div>
+      <div class="muted err" id="blocklistWarning" style="display:none;background:#fdecea;border:1px solid #f1948a;border-radius:6px;padding:8px 10px;margin-bottom:10px;color:#922b21;"></div>
       <label>Customer Address / Site *</label>
       <textarea id="customer_address" placeholder="Full address for the technician to locate the site" required></textarea>
       <label>Nature of Complaint</label>
@@ -70,34 +71,104 @@
         <option value="reviewed">Reviewed</option>
         <option value="approved">Approved</option>
         <option value="sent">Sent</option>
+        <option value="cancelled">Cancelled</option>
       </select>
     </div>
     <table class="list" id="jobsTable">
-      <thead><tr><th>Job Ref</th><th>Customer</th><th>Technician</th><th>Complaint</th><th>Status</th></tr></thead>
+      <thead><tr><th>Job Ref</th><th>Customer</th><th>Technician</th><th>Complaint</th><th>Status</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
 
 </div>
 
+<!-- Inline edit panel for an assigned-but-not-yet-started job. Hidden until
+     "Edit" is clicked on a row; only technician, address, complaint, amount,
+     and preferred date can be changed here, and only before the technician
+     submits their completed report. -->
+<div class="container" id="editPanelWrap" style="display:none;">
+  <div class="card">
+    <div class="flex-between">
+      <h2 style="border:none;margin:0;padding:0;">Edit Job <span id="editJobRef"></span></h2>
+      <button class="btn secondary small" type="button" onclick="closeEditPanel()">Close</button>
+    </div>
+    <div class="grid2">
+      <div>
+        <label>Assign To Technician</label>
+        <select id="edit_technician_id"></select>
+      </div>
+      <div>
+        <label>Amount to Charge (BND)</label>
+        <input type="number" id="edit_amount" step="0.01" min="0">
+      </div>
+    </div>
+    <label>Customer Address / Site</label>
+    <textarea id="edit_customer_address"></textarea>
+    <label>Nature of Complaint</label>
+    <textarea id="edit_complaint_description"></textarea>
+    <label>Preferred Service Date</label>
+    <input type="date" id="edit_service_date" style="max-width:220px;">
+    <div style="height:6px;"></div>
+    <button class="btn" type="button" onclick="saveJobEdit()">Save Changes</button>
+    <span class="muted" id="editStatus" style="margin-left:12px;"></span>
+  </div>
+</div>
+
 <script>
+let technicianList = [];
+let blocklist = [];
+
 async function init() {
   const me = await fetch('/api/me').then(r => r.json());
   if (!me.user || me.user.role !== 'scheduler') { window.location.href = '/'; return; }
   document.getElementById('userName').textContent = me.user.name;
   await loadTechnicians();
+  await loadBlocklist();
   loadJobs();
+  document.getElementById('customer_name').addEventListener('input', checkBlocklist);
+  document.getElementById('customer_phone').addEventListener('input', checkBlocklist);
+  document.getElementById('customer_address').addEventListener('input', checkBlocklist);
 }
 
 async function loadTechnicians() {
   const data = await fetch('/api/technicians').then(r => r.json());
+  technicianList = data.technicians || [];
   const sel = document.getElementById('technician_id');
-  (data.technicians || []).forEach(t => {
+  const editSel = document.getElementById('edit_technician_id');
+  technicianList.forEach(t => {
     const opt = document.createElement('option');
     opt.value = t.id;
     opt.textContent = t.name;
     sel.appendChild(opt);
+    editSel.appendChild(opt.cloneNode(true));
   });
+}
+
+async function loadBlocklist() {
+  const data = await fetch('/api/blocklist').then(r => r.json()).catch(() => ({}));
+  blocklist = data.blocklist || [];
+}
+
+function norm(s) { return (s || '').toString().trim().toLowerCase(); }
+
+// Warns the scheduler (without blocking them) if the name, phone, or address
+// they're typing matches a customer the Head has flagged as blocklisted.
+function checkBlocklist() {
+  const name = norm(document.getElementById('customer_name').value);
+  const phone = norm(document.getElementById('customer_phone').value);
+  const address = norm(document.getElementById('customer_address').value);
+  const match = blocklist.find(b =>
+    (name && norm(b.customer_name) === name) ||
+    (phone && norm(b.customer_phone) === phone) ||
+    (address && norm(b.customer_address) === address)
+  );
+  const box = document.getElementById('blocklistWarning');
+  if (match) {
+    box.style.display = '';
+    box.textContent = '⚠ This customer is blocklisted' + (match.reason ? ': ' + match.reason : '.') + ' Tagged by ' + (match.tagged_by || 'Head of Department') + '. You may still proceed.';
+  } else {
+    box.style.display = 'none';
+  }
 }
 
 function toast(msg, isErr) {
@@ -166,19 +237,102 @@ document.getElementById('jobForm').addEventListener('submit', async (e) => {
   btn.disabled = false;
 });
 
+let jobsCache = [];
+
 async function loadJobs() {
   const data = await fetch('/api/reports').then(r => r.json());
+  jobsCache = data.reports || [];
   const filter = document.getElementById('statusFilter').value;
-  const rows = (data.reports || []).filter(r => !filter || r.status === filter);
+  const rows = jobsCache.filter(r => {
+    if (filter === 'cancelled') return !!r.cancelled_at;
+    if (!filter) return true;
+    return r.status === filter && !r.cancelled_at;
+  });
   const tbody = document.querySelector('#jobsTable tbody');
-  tbody.innerHTML = rows.map(r => `
+  tbody.innerHTML = rows.map(r => {
+    const statusLabel = r.cancelled_at ? 'cancelled' : r.status;
+    const statusTitle = r.cancelled_at ? `title="Reason: ${(r.cancel_reason || '').replace(/"/g, '&quot;')}"` : '';
+    const actions = [];
+    if (!r.cancelled_at && r.status === 'assigned') {
+      actions.push(`<button type="button" class="btn secondary small" onclick="openEditPanel(${r.id})">Edit</button>`);
+      actions.push(`<button type="button" class="btn secondary small" onclick="cancelJob(${r.id})">Cancel</button>`);
+    }
+    if (!r.cancelled_at && r.status !== 'assigned') {
+      actions.push(`<a class="btn secondary small" href="/api/reports/${r.id}/pdf" target="_blank">View PDF</a>`);
+    }
+    return `
     <tr>
       <td>${r.job_ref}</td>
       <td>${r.customer_name}</td>
       <td>${r.technician_name}</td>
       <td>${(r.complaint_description || '').slice(0, 60)}${(r.complaint_description || '').length > 60 ? '…' : ''}</td>
-      <td><span class="badge ${r.status}">${r.status}</span></td>
-    </tr>`).join('') || '<tr><td colspan="5" class="muted">No jobs scheduled yet.</td></tr>';
+      <td><span class="badge ${statusLabel}" ${statusTitle}>${statusLabel}</span></td>
+      <td style="white-space:nowrap;">${actions.join(' ')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="muted">No jobs scheduled yet.</td></tr>';
+}
+
+async function cancelJob(id) {
+  const reason = prompt('Reason for cancelling this job:');
+  if (reason === null) return;
+  if (!reason.trim()) { toast('A cancellation reason is required.', true); return; }
+  try {
+    const res = await fetch('/api/jobs/' + id + '/cancel', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to cancel job');
+    toast('Job cancelled.');
+    loadJobs();
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+let editingJobId = null;
+
+function openEditPanel(id) {
+  const r = jobsCache.find(j => j.id === id);
+  if (!r) return;
+  editingJobId = id;
+  document.getElementById('editJobRef').textContent = r.job_ref;
+  document.getElementById('edit_technician_id').value = r.technician_id;
+  document.getElementById('edit_amount').value = r.amount || '';
+  document.getElementById('edit_customer_address').value = r.customer_address || '';
+  document.getElementById('edit_complaint_description').value = r.complaint_description || '';
+  document.getElementById('edit_service_date').value = r.service_date || '';
+  document.getElementById('editStatus').textContent = '';
+  document.getElementById('editPanelWrap').style.display = '';
+  document.getElementById('editPanelWrap').scrollIntoView({ behavior: 'smooth' });
+}
+
+function closeEditPanel() {
+  editingJobId = null;
+  document.getElementById('editPanelWrap').style.display = 'none';
+}
+
+async function saveJobEdit() {
+  if (!editingJobId) return;
+  const body = {
+    technician_id: document.getElementById('edit_technician_id').value,
+    amount: document.getElementById('edit_amount').value,
+    customer_address: document.getElementById('edit_customer_address').value,
+    complaint_description: document.getElementById('edit_complaint_description').value,
+    service_date: document.getElementById('edit_service_date').value
+  };
+  try {
+    const res = await fetch('/api/jobs/' + editingJobId + '/scheduler-edit', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save changes');
+    toast('Job updated.');
+    closeEditPanel();
+    loadJobs();
+  } catch (err) {
+    toast(err.message, true);
+    document.getElementById('editStatus').textContent = err.message;
+  }
 }
 
 function logout() {

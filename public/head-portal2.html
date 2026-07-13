@@ -28,6 +28,8 @@
             <option value="reviewed">Reviewed</option>
             <option value="approved">Approved</option>
             <option value="sent">Sent</option>
+            <option value="rejected">Rejected (awaiting technician)</option>
+            <option value="cancelled">Cancelled</option>
           </select>
         </div>
       </div>
@@ -36,11 +38,30 @@
         <tbody></tbody>
       </table>
     </div>
+
+    <div class="card">
+      <h2>Blocklisted Customers</h2>
+      <div class="muted" style="margin-bottom:8px;">Flagged customers stay tagged across every future job entered under their name, phone, or address until removed here.</div>
+      <table class="list" id="blocklistTable">
+        <thead><tr><th>Name</th><th>Phone</th><th>Address</th><th>Reason</th><th>Tagged By</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 
   <div id="viewDetail" style="display:none;">
     <button class="btn secondary small" onclick="backToList()">&larr; Back to list</button>
     <div style="height:14px;"></div>
+
+    <div class="card" id="cancelledBanner" style="display:none;background:#fdecea;border-color:#f1948a;">
+      <strong style="color:#922b21;">This job was cancelled by the scheduler.</strong>
+      <div class="muted" id="cancelledReasonText"></div>
+    </div>
+
+    <div class="card" id="rejectedBanner" style="display:none;background:#fdecea;border-color:#f1948a;">
+      <strong style="color:#922b21;">Sent back to the technician for correction.</strong>
+      <div class="muted" id="rejectedReasonText"></div>
+    </div>
 
     <div class="card">
       <div class="flex-between">
@@ -60,15 +81,16 @@
     </div>
 
     <div class="card">
-      <h2>Customer Details</h2>
+      <div class="flex-between" style="align-items:flex-start;">
+        <h2 style="border:none;margin:0;padding:0;">Customer Details</h2>
+        <button type="button" class="btn secondary small" id="blocklistBtn" onclick="toggleBlocklist()"></button>
+      </div>
       <div class="grid2">
         <div><label>Customer Name</label><input type="text" id="e_customer_name"></div>
         <div><label>Phone</label><input type="text" id="e_customer_phone"></div>
       </div>
-      <div class="grid2">
-        <div><label>Email</label><input type="email" id="e_customer_email"></div>
-        <div><label>Unit Location</label><input type="text" id="e_unit_location"></div>
-      </div>
+      <label>Email</label>
+      <input type="email" id="e_customer_email">
       <label>Address</label>
       <textarea id="e_customer_address"></textarea>
     </div>
@@ -134,8 +156,10 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn secondary" id="saveBtn" onclick="saveEdits()">Save Changes</button>
         <button class="btn" id="approveBtn" onclick="approveReport()">Approve Report</button>
+        <button class="btn" id="rejectBtn" onclick="rejectReport()" style="background:#c0392b;">Reject &amp; Send Back to Technician</button>
         <a class="btn secondary" id="pdfBtn" target="_blank">View / Print PDF</a>
         <button class="btn" id="sendBtn" onclick="sendToCustomer()" style="background:#1b8a5a;">Send to Customer by Email</button>
+        <button class="btn" id="sendAccountsBtn" onclick="sendToAccounts()" style="background:#8e44ad;">Send to Accounts for Invoicing</button>
       </div>
       <div class="muted" id="actionStatus" style="margin-top:10px;"></div>
     </div>
@@ -145,27 +169,116 @@
 
 <script>
 let currentReportId = null;
+let currentReport = null;
+let blocklist = [];
 
 async function init() {
   const me = await fetch('/api/me').then(r => r.json());
   if (!me.user || me.user.role !== 'head') { window.location.href = '/'; return; }
   document.getElementById('userName').textContent = 'AEC Sdn Bhd (Head of Department)';
+  await loadBlocklistData();
   loadList();
+}
+
+async function loadBlocklistData() {
+  const data = await fetch('/api/blocklist').then(r => r.json()).catch(() => ({}));
+  blocklist = data.blocklist || [];
+  const tbody = document.querySelector('#blocklistTable tbody');
+  tbody.innerHTML = blocklist.map(b => `
+    <tr>
+      <td>${b.customer_name || '-'}</td>
+      <td>${b.customer_phone || '-'}</td>
+      <td>${b.customer_address || '-'}</td>
+      <td>${b.reason || '-'}</td>
+      <td>${b.tagged_by || '-'}</td>
+      <td><button type="button" class="btn secondary small" onclick="removeBlocklist(${b.id})">Remove</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">No customers blocklisted.</td></tr>';
+}
+
+function norm(s) { return (s || '').toString().trim().toLowerCase(); }
+
+function findBlocklistMatch(name, phone, address) {
+  const n = norm(name), p = norm(phone), a = norm(address);
+  return blocklist.find(b =>
+    (n && norm(b.customer_name) === n) ||
+    (p && norm(b.customer_phone) === p) ||
+    (a && norm(b.customer_address) === a)
+  );
+}
+
+async function toggleBlocklist() {
+  const name = document.getElementById('e_customer_name').value;
+  const phone = document.getElementById('e_customer_phone').value;
+  const address = document.getElementById('e_customer_address').value;
+  const match = findBlocklistMatch(name, phone, address);
+  if (match) {
+    if (!confirm('Remove ' + (match.customer_name || 'this customer') + ' from the blocklist?')) return;
+    await fetch('/api/blocklist/' + match.id, { method: 'DELETE' });
+    toast('Removed from blocklist.');
+  } else {
+    const reason = prompt('Reason for blocklisting ' + (name || 'this customer') + ':');
+    if (reason === null) return;
+    const res = await fetch('/api/blocklist', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_name: name, customer_phone: phone, customer_address: address, reason })
+    });
+    if (!res.ok) { toast('Failed to blocklist customer.', true); return; }
+    toast('Customer blocklisted.');
+  }
+  await loadBlocklistData();
+  updateBlocklistButton();
+}
+
+function updateBlocklistButton() {
+  const name = document.getElementById('e_customer_name').value;
+  const phone = document.getElementById('e_customer_phone').value;
+  const address = document.getElementById('e_customer_address').value;
+  const match = findBlocklistMatch(name, phone, address);
+  const btn = document.getElementById('blocklistBtn');
+  if (match) {
+    btn.textContent = '🚫 Blocklisted — Remove Tag';
+    btn.style.background = '#c0392b';
+    btn.style.color = '#fff';
+    btn.style.borderColor = '#c0392b';
+  } else {
+    btn.textContent = 'Blocklist this Customer';
+    btn.style.background = '';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+  }
+}
+
+async function removeBlocklist(id) {
+  if (!confirm('Remove this customer from the blocklist?')) return;
+  await fetch('/api/blocklist/' + id, { method: 'DELETE' });
+  toast('Removed from blocklist.');
+  await loadBlocklistData();
+  if (currentReport) updateBlocklistButton();
 }
 
 async function loadList() {
   const data = await fetch('/api/reports').then(r => r.json());
   const filter = document.getElementById('statusFilter').value;
-  const rows = (data.reports || []).filter(r => !filter || r.status === filter);
+  const rows = (data.reports || []).filter(r => {
+    if (filter === 'cancelled') return !!r.cancelled_at;
+    if (filter === 'rejected') return !!r.reject_reason && !r.cancelled_at;
+    if (!filter) return true;
+    return r.status === filter && !r.cancelled_at && !r.reject_reason;
+  });
   const tbody = document.querySelector('#listTable tbody');
-  tbody.innerHTML = rows.map(r => `
+  tbody.innerHTML = rows.map(r => {
+    let label = r.status;
+    if (r.cancelled_at) label = 'cancelled';
+    else if (r.reject_reason) label = 'rejected';
+    return `
     <tr onclick="openReport(${r.id})">
       <td>${r.job_ref}</td>
       <td>${r.service_date}</td>
       <td>${r.technician_name}</td>
       <td>${r.customer_name}</td>
-      <td><span class="badge ${r.status}">${r.status}</span></td>
-    </tr>`).join('') || '<tr><td colspan="5" class="muted">No reports yet.</td></tr>';
+      <td><span class="badge ${label}">${label}</span></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="muted">No reports yet.</td></tr>';
 }
 
 function backToList() {
@@ -178,20 +291,27 @@ async function openReport(id) {
   currentReportId = id;
   const data = await fetch('/api/reports/' + id).then(r => r.json());
   const r = data.report;
+  currentReport = r;
   document.getElementById('viewList').style.display = 'none';
   document.getElementById('viewDetail').style.display = '';
 
   document.getElementById('detailJobRef').textContent = r.job_ref;
-  document.getElementById('detailStatus').textContent = r.status;
-  document.getElementById('detailStatus').className = 'badge ' + r.status;
+  const statusLabel = r.cancelled_at ? 'cancelled' : (r.reject_reason ? 'rejected' : r.status);
+  document.getElementById('detailStatus').textContent = statusLabel;
+  document.getElementById('detailStatus').className = 'badge ' + statusLabel;
   document.getElementById('detailMeta').textContent =
     `Technician: ${r.technician_name}  |  Service Date: ${r.service_date}  |  Type: ${r.service_type}`;
+
+  document.getElementById('cancelledBanner').style.display = r.cancelled_at ? '' : 'none';
+  document.getElementById('cancelledReasonText').textContent = r.cancel_reason ? ('Reason: ' + r.cancel_reason) : '';
+  document.getElementById('rejectedBanner').style.display = (!r.cancelled_at && r.reject_reason) ? '' : 'none';
+  document.getElementById('rejectedReasonText').textContent = r.reject_reason ? ('Reason: ' + r.reject_reason) : '';
 
   document.getElementById('e_customer_name').value = r.customer_name || '';
   document.getElementById('e_customer_phone').value = r.customer_phone || '';
   document.getElementById('e_customer_email').value = r.customer_email || '';
-  document.getElementById('e_unit_location').value = r.unit_location || '';
   document.getElementById('e_customer_address').value = r.customer_address || '';
+  updateBlocklistButton();
   document.getElementById('e_unitsList').innerHTML = '';
   let existingUnits = [];
   try { existingUnits = JSON.parse(r.units_json || '[]'); } catch(e) {}
@@ -231,14 +351,24 @@ async function openReport(id) {
 
   document.getElementById('pdfBtn').href = '/api/reports/' + id + '/pdf';
   document.getElementById('actionStatus').textContent = '';
+
+  // Reject is only meaningful before approval; Send to Accounts only after
+  // approval and only once.
+  document.getElementById('rejectBtn').style.display = (!r.cancelled_at && ['submitted', 'reviewed'].includes(r.status)) ? '' : 'none';
+  document.getElementById('approveBtn').style.display = (!r.cancelled_at && r.status !== 'approved' && r.status !== 'sent') ? '' : 'none';
+  document.getElementById('sendAccountsBtn').style.display = (!r.cancelled_at && r.status === 'approved' && !r.accounts_sent_at) ? '' : 'none';
+  if (r.accounts_sent_at) {
+    document.getElementById('actionStatus').textContent = 'Sent to Accounts for invoicing on ' + r.accounts_sent_at + '. The technician can no longer edit this report.';
+  }
 }
 
 function addEUnitRow(prefill) {
   const list = document.getElementById('e_unitsList');
   const row = document.createElement('div');
   row.className = 'unit-row';
-  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px;';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px;';
   row.innerHTML = `
+    <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Unit Location</label><input type="text" class="unit-location" style="margin-bottom:0;"></div>
     <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Unit Model</label><input type="text" class="unit-model" style="margin-bottom:0;"></div>
     <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Serial Number</label><input type="text" class="unit-serial" style="margin-bottom:0;"></div>
     <div><label style="font-weight:400;font-size:0.85em;margin-bottom:4px;">Operating Pressure (PSI)</label><input type="text" class="unit-psi" style="margin-bottom:0;"></div>
@@ -246,6 +376,7 @@ function addEUnitRow(prefill) {
     <button type="button" class="btn secondary small" onclick="this.parentElement.remove()">Remove</button>`;
   list.appendChild(row);
   if (prefill) {
+    row.querySelector('.unit-location').value = prefill.location || '';
     row.querySelector('.unit-model').value = prefill.model || '';
     row.querySelector('.unit-serial').value = prefill.serial || '';
     row.querySelector('.unit-psi').value = prefill.psi || '';
@@ -266,14 +397,14 @@ async function saveEdits() {
     customer_name: document.getElementById('e_customer_name').value,
     customer_phone: document.getElementById('e_customer_phone').value,
     customer_email: document.getElementById('e_customer_email').value,
-    unit_location: document.getElementById('e_unit_location').value,
     customer_address: document.getElementById('e_customer_address').value,
     units_json: JSON.stringify(Array.from(document.querySelectorAll('#e_unitsList .unit-row')).map(row => ({
+      location: row.querySelector('.unit-location').value,
       model: row.querySelector('.unit-model').value,
       serial: row.querySelector('.unit-serial').value,
       psi: row.querySelector('.unit-psi').value,
       ampere: row.querySelector('.unit-ampere').value
-    })).filter(u => u.model || u.serial || u.psi || u.ampere)),
+    })).filter(u => u.location || u.model || u.serial || u.psi || u.ampere)),
     complaint_description: document.getElementById('e_complaint_description').value,
     job_ref: document.getElementById('e_job_ref').value,
     written_name: document.getElementById('e_written_name').value,
@@ -300,6 +431,26 @@ async function approveReport() {
   const res = await fetch('/api/reports/' + currentReportId + '/approve', { method: 'POST' });
   if (res.ok) { toast('Report approved.'); openReport(currentReportId); }
   else toast('Failed to approve.', true);
+}
+
+async function rejectReport() {
+  const reason = prompt('Reason for rejecting this report (sent back to the technician):');
+  if (reason === null) return;
+  if (!reason.trim()) { toast('A reason is required to reject a report.', true); return; }
+  const res = await fetch('/api/reports/' + currentReportId + '/reject', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) { toast('Report rejected and sent back to the technician.'); openReport(currentReportId); }
+  else toast(data.error || 'Failed to reject.', true);
+}
+
+async function sendToAccounts() {
+  if (!confirm('Send this report to Accounts for invoicing? The technician will no longer be able to edit it after this.')) return;
+  const res = await fetch('/api/reports/' + currentReportId + '/send-to-accounts', { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) { toast('Sent to Accounts for invoicing.'); openReport(currentReportId); }
+  else toast(data.error || 'Failed to send to Accounts.', true);
 }
 
 async function sendToCustomer() {
