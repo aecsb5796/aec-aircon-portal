@@ -19,7 +19,7 @@
   <div id="viewList">
     <div class="card" id="pendingApprovalsCard">
       <h2>Pending Job Approvals</h2>
-      <div class="muted" style="margin-bottom:8px;">New job assignments from the Scheduler wait here until you approve them — the technician cannot open or start the job until you do.</div>
+      <div class="muted" style="margin-bottom:8px;">New job assignments from the Scheduler wait here until you approve them — the technician cannot open or start the job until you do. Click a row to review the full job details before approving.</div>
       <table class="list" id="pendingApprovalsTable">
         <thead><tr><th>Job Ref</th><th>Customer</th><th>Technician</th><th>Complaint</th><th></th></tr></thead>
         <tbody></tbody>
@@ -70,6 +70,11 @@
     <div class="card" id="rejectedBanner" style="display:none;background:#fdecea;border-color:#f1948a;">
       <strong style="color:#922b21;">Sent back to the technician for correction.</strong>
       <div class="muted" id="rejectedReasonText"></div>
+    </div>
+
+    <div class="card" id="pendingApprovalBanner" style="display:none;background:#fff7e6;border-color:#f0dfc0;">
+      <strong style="color:#b45309;">Awaiting your approval &mdash; this job was just assigned by the Scheduler.</strong>
+      <div class="muted">Review the customer, complaint, and unit/location details below. The technician cannot open or start this job until you approve it.</div>
     </div>
 
     <div class="card">
@@ -166,6 +171,7 @@
     <div class="card">
       <h2>Actions</h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn" id="approveJobBtn" onclick="approveJobFromDetail()">Approve &mdash; Allow Technician to Start</button>
         <button class="btn secondary" id="saveBtn" onclick="saveEdits()">Save Changes</button>
         <button class="btn" id="approveBtn" onclick="approveReport()">Approve Report</button>
         <button class="btn" id="rejectBtn" onclick="rejectReport()" style="background:#c0392b;">Reject &amp; Send Back to Technician</button>
@@ -304,12 +310,12 @@ function renderPendingApprovals(allReports) {
   const rows = allReports.filter(r => r.status === 'assigned' && !r.cancelled_at && !r.head_approved_at);
   const tbody = document.querySelector('#pendingApprovalsTable tbody');
   tbody.innerHTML = rows.map(r => `
-    <tr>
+    <tr onclick="openReport(${r.id})">
       <td>${r.job_ref}</td>
       <td>${r.customer_name}</td>
       <td>${r.technician_name}</td>
       <td>${(r.complaint_description || '').slice(0, 60)}${(r.complaint_description || '').length > 60 ? '…' : ''}</td>
-      <td><button type="button" class="btn small" onclick="approveJobAssignment(${r.id})">Approve &mdash; Allow Technician to Start</button></td>
+      <td><button type="button" class="btn small" onclick="event.stopPropagation(); approveJobAssignment(${r.id})">Approve &mdash; Allow Technician to Start</button></td>
     </tr>`).join('') || '<tr><td colspan="5" class="muted">No job assignments waiting for approval.</td></tr>';
 }
 
@@ -317,6 +323,16 @@ async function approveJobAssignment(id) {
   const res = await fetch('/api/jobs/' + id + '/approve', { method: 'POST' });
   const data = await res.json().catch(() => ({}));
   if (res.ok) { toast('Job approved — the technician can now start it.'); loadList(); }
+  else toast(data.error || 'Failed to approve job.', true);
+}
+
+// Same job-assignment approval as approveJobAssignment() above, but used
+// from inside the detail view (reached by clicking a row in Pending Job
+// Approvals) — refreshes the open detail view instead of the list.
+async function approveJobFromDetail() {
+  const res = await fetch('/api/jobs/' + currentReportId + '/approve', { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) { toast('Job approved — the technician can now start it.'); openReport(currentReportId); }
   else toast(data.error || 'Failed to approve job.', true);
 }
 
@@ -345,6 +361,12 @@ async function openReport(id) {
   document.getElementById('cancelledReasonText').textContent = r.cancel_reason ? ('Reason: ' + r.cancel_reason) : '';
   document.getElementById('rejectedBanner').style.display = (!r.cancelled_at && r.reject_reason) ? '' : 'none';
   document.getElementById('rejectedReasonText').textContent = r.reject_reason ? ('Reason: ' + r.reject_reason) : '';
+  // A job the Scheduler just assigned is not yet approved (head_approved_at
+  // is NULL) — show the review banner and the job-assignment approve action
+  // instead of the report-review actions, since there's no submitted work
+  // to review or approve yet.
+  const awaitingJobApproval = !r.cancelled_at && r.status === 'assigned' && !r.head_approved_at;
+  document.getElementById('pendingApprovalBanner').style.display = awaitingJobApproval ? '' : 'none';
 
   document.getElementById('e_customer_name').value = r.customer_name || '';
   document.getElementById('e_customer_phone').value = r.customer_phone || '';
@@ -394,9 +416,14 @@ async function openReport(id) {
   document.getElementById('actionStatus').textContent = '';
 
   // Reject is only meaningful before approval; Send to Accounts only after
-  // approval and only once.
+  // approval and only once. The job-assignment "Approve — Allow Technician
+  // to Start" action only applies while the job is freshly assigned and
+  // unapproved; the report-review "Approve Report" action only applies once
+  // the technician has actually submitted work (never for a bare assignment).
+  document.getElementById('approveJobBtn').style.display = awaitingJobApproval ? '' : 'none';
   document.getElementById('rejectBtn').style.display = (!r.cancelled_at && ['submitted', 'reviewed'].includes(r.status)) ? '' : 'none';
-  document.getElementById('approveBtn').style.display = (!r.cancelled_at && r.status !== 'approved' && r.status !== 'sent') ? '' : 'none';
+  document.getElementById('approveBtn').style.display = (!r.cancelled_at && r.status !== 'assigned' && r.status !== 'approved' && r.status !== 'sent') ? '' : 'none';
+  document.getElementById('saveBtn').style.display = awaitingJobApproval ? 'none' : '';
   document.getElementById('sendAccountsBtn').style.display = (!r.cancelled_at && r.status === 'approved' && !r.accounts_sent_at) ? '' : 'none';
   if (r.accounts_sent_at) {
     document.getElementById('actionStatus').textContent = 'Sent to Accounts for invoicing on ' + r.accounts_sent_at + '. The technician can no longer edit this report.';
