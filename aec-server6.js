@@ -170,6 +170,41 @@ app.delete('/api/blocklist/:id', requireAuth, requireRole('head'), async (req, r
   }
 });
 
+// ---------- Local network backup (Head only) ----------
+// Lets a small script running on an office computer pull a full copy of the
+// live data down over HTTPS — no direct database credentials needed on the
+// local machine, just a Head login. Two parts: this route dumps every table
+// as JSON, and uploads-list below lists the photo filenames so the script
+// can download each one from the existing public /uploads/<filename> route.
+app.get('/api/admin/backup', requireAuth, requireRole('head'), async (req, res) => {
+  try {
+    const [reports, users, blocklist] = await Promise.all([
+      db.prepare('SELECT * FROM reports').all(),
+      db.prepare('SELECT id, username, name, role, created_at FROM users').all(),
+      db.prepare('SELECT * FROM customer_blocklist').all()
+    ]);
+    res.json({
+      generated_at: new Date().toISOString(),
+      reports,
+      users,
+      blocklist
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate backup' });
+  }
+});
+
+app.get('/api/admin/uploads-list', requireAuth, requireRole('head'), async (req, res) => {
+  try {
+    const files = fs.readdirSync(uploadsDir).filter(f => fs.statSync(path.join(uploadsDir, f)).isFile());
+    res.json({ files });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list uploads' });
+  }
+});
+
 // ---------- Scheduler: create a job assignment ----------
 app.post('/api/jobs', requireAuth, requireRole('scheduler'), async (req, res) => {
   try {
