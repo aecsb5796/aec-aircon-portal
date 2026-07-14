@@ -277,6 +277,10 @@ app.put('/api/jobs/:id/scheduler-edit', requireAuth, requireRole('scheduler'), a
     if (b.discount !== undefined) { updates.push('discount = ?'); values.push(b.discount); }
     if (b.payment_method !== undefined) { updates.push('payment_method = ?'); values.push(b.payment_method); }
     if (b.service_date !== undefined) { updates.push('service_date = ?'); values.push(b.service_date); }
+    // Editing after the Head returned this job is treated as "fixed, please
+    // look again" — clear the reason so it re-enters the Head's Pending Job
+    // Approvals queue.
+    if (row.scheduler_return_reason) { updates.push('scheduler_return_reason = NULL'); }
     if (!updates.length) return res.json({ ok: true });
     updates.push("updated_at = datetime('now')");
     values.push(req.params.id);
@@ -306,6 +310,30 @@ app.post('/api/jobs/:id/approve', requireAuth, requireRole('head'), async (req, 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to approve job assignment' });
+  }
+});
+
+// Head: instead of approving a newly-assigned job, send it back to the
+// Scheduler with a required reason (e.g. wrong technician, bad address,
+// unclear complaint). The job stays unapproved and drops out of this
+// Pending Job Approvals queue; it reappears in the Scheduler's list flagged
+// with the reason. Editing the job via PUT /api/jobs/:id/scheduler-edit
+// automatically clears the reason and puts it back in front of the Head.
+app.post('/api/jobs/:id/return-to-scheduler', requireAuth, requireRole('head'), async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    if (row.cancelled_at) return res.status(400).json({ error: 'This job has been cancelled.' });
+    if (row.status !== 'assigned' || row.head_approved_at) {
+      return res.status(400).json({ error: 'Only a newly assigned job awaiting approval can be returned to the scheduler.' });
+    }
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to return this job to the scheduler.' });
+    await db.prepare("UPDATE reports SET scheduler_return_reason = ?, updated_at = datetime('now') WHERE id = ?").run(reason, req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to return job to scheduler' });
   }
 });
 

@@ -204,7 +204,14 @@ CREATE TABLE IF NOT EXISTS customer_blocklist (
     // Approvals" queue and the technician is not allowed to open/start it —
     // see the head_approval_backfill_v1 migration below and the
     // /api/jobs/:id/approve route.
-    'head_approved_at'
+    'head_approved_at',
+    // Set when the Head sends a newly-assigned job back to the Scheduler
+    // (instead of approving it) with a required reason. While set, the job
+    // drops out of the Head's Pending Job Approvals queue and shows up in
+    // the Scheduler's list flagged for correction; it's cleared
+    // automatically once the Scheduler edits and saves the job again — see
+    // /api/jobs/:id/return-to-scheduler and PUT /api/jobs/:id/scheduler-edit.
+    'scheduler_return_reason'
   ];
   for (const col of newColumns) {
     try {
