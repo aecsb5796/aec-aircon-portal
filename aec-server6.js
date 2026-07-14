@@ -682,23 +682,74 @@ function renderReportPdf(doc, report) {
   doc.y = boxY + boxH + 10;
   doc.fillColor('#000');
 
-  // ---- Service type / job location / technician ----
+  // ---- Service type / technician ----
   let units = [];
   try { units = JSON.parse(report.units_json || '[]'); } catch (e) {}
-  const jobLocation = units.map(u => u.location).filter(Boolean).join(', ');
   doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY).text('SERVICE TYPE:', LEFT, doc.y, { continued: true });
-  doc.font('Helvetica').fillColor('#000').fontSize(9).text('  ' + (report.service_type || '-') + (jobLocation ? '      JOB LOCATION:  ' + jobLocation : ''));
+  doc.font('Helvetica').fillColor('#000').fontSize(9).text('  ' + (report.service_type || '-'));
   doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY).text('TECHNICIAN:', LEFT, doc.y + 2, { continued: true });
   doc.font('Helvetica').fillColor('#000').fontSize(9).text('  ' + (report.technician_name || '-'));
   doc.moveDown(0.4);
 
+  // ---- Unit Type / Model / Serial No. table, each row paired with its own
+  // Job Location so it's clear which unit belongs to which room/area rather
+  // than listing all locations in one separate line. ----
   if (units.length) {
-    doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY).text('UNIT TYPE / MODEL / SERIAL NO', LEFT, doc.y);
-    doc.fillColor('#000').font('Helvetica').fontSize(8.5);
-    units.forEach((u, i) => {
-      doc.text(`${i + 1}. Model: ${u.model || '-'}   Serial No.: ${u.serial || '-'}   Operating Pressure (PSI): ${u.psi || '-'}   Current (Ampere): ${u.ampere || '-'}`);
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY).text('UNIT TYPE / MODEL / SERIAL NO (BY JOB LOCATION)', LEFT, doc.y);
+    doc.moveDown(0.15);
+
+    const uX = LEFT, uW = WIDTH;
+    const colNoW = uW * 0.05, colLocW = uW * 0.20, colModelW = uW * 0.20, colSerialW = uW * 0.20, colPsiW = uW * 0.175, colAmpW = uW * 0.175;
+    const uHeadH = 16;
+
+    doc.font('Helvetica').fontSize(8);
+    const rowHeights = units.map(u => {
+      const cells = [String(u.location || '-'), String(u.model || '-'), String(u.serial || '-'), String(u.psi || '-'), String(u.ampere || '-')];
+      const widths = [colLocW, colModelW, colSerialW, colPsiW, colAmpW];
+      const h = Math.max(...cells.map((t, i) => doc.heightOfString(t, { width: widths[i] - 8 })));
+      return Math.max(16, h + 8);
     });
-    doc.moveDown(0.4);
+    const uTableH = uHeadH + rowHeights.reduce((a, b) => a + b, 0);
+    if (doc.y + uTableH > 760) doc.addPage();
+
+    const uY = doc.y;
+    doc.rect(uX, uY, uW, uHeadH).fillAndStroke('#eef2f8', GREY);
+    doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(7.5);
+    let hx = uX;
+    doc.text('NO', hx + 4, uY + 4, { width: colNoW - 6 }); hx += colNoW;
+    doc.text('JOB LOCATION', hx + 4, uY + 4, { width: colLocW - 6 }); hx += colLocW;
+    doc.text('MODEL', hx + 4, uY + 4, { width: colModelW - 6 }); hx += colModelW;
+    doc.text('SERIAL NO', hx + 4, uY + 4, { width: colSerialW - 6 }); hx += colSerialW;
+    doc.text('PRESSURE (PSI)', hx + 4, uY + 4, { width: colPsiW - 6, align: 'center' }); hx += colPsiW;
+    doc.text('CURRENT (A)', hx + 4, uY + 4, { width: colAmpW - 6, align: 'center' });
+
+    let ry = uY + uHeadH;
+    doc.fillColor('#000').font('Helvetica').fontSize(8);
+    units.forEach((u, i) => {
+      const rh = rowHeights[i];
+      doc.rect(uX, ry, uW, rh).strokeColor(GREY).lineWidth(0.75).stroke();
+      let cx = uX;
+      doc.text(String(i + 1), cx + 4, ry + 4, { width: colNoW - 6 });
+      cx += colNoW;
+      doc.moveTo(cx, ry).lineTo(cx, ry + rh).strokeColor(GREY).stroke();
+      doc.text(u.location || '-', cx + 4, ry + 4, { width: colLocW - 8 });
+      cx += colLocW;
+      doc.moveTo(cx, ry).lineTo(cx, ry + rh).strokeColor(GREY).stroke();
+      doc.text(u.model || '-', cx + 4, ry + 4, { width: colModelW - 8 });
+      cx += colModelW;
+      doc.moveTo(cx, ry).lineTo(cx, ry + rh).strokeColor(GREY).stroke();
+      doc.text(u.serial || '-', cx + 4, ry + 4, { width: colSerialW - 8 });
+      cx += colSerialW;
+      doc.moveTo(cx, ry).lineTo(cx, ry + rh).strokeColor(GREY).stroke();
+      doc.text(u.psi || '-', cx + 4, ry + 4, { width: colPsiW - 8, align: 'center' });
+      cx += colPsiW;
+      doc.moveTo(cx, ry).lineTo(cx, ry + rh).strokeColor(GREY).stroke();
+      doc.text(u.ampere || '-', cx + 4, ry + 4, { width: colAmpW - 8, align: 'center' });
+      ry += rh;
+    });
+    doc.y = ry + 8;
+    doc.x = LEFT;
+    doc.fillColor('#000');
   }
 
   // ---- Job description / cost table ----
