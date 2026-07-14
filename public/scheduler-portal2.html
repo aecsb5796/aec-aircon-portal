@@ -86,6 +86,7 @@
       <select id="statusFilter" onchange="loadJobs()">
         <option value="">All statuses</option>
         <option value="assigned">Assigned (not started)</option>
+        <option value="returned">Returned by Head &mdash; needs correction</option>
         <option value="submitted">Submitted</option>
         <option value="reviewed">Reviewed</option>
         <option value="approved">Approved</option>
@@ -111,6 +112,7 @@
       <h2 style="border:none;margin:0;padding:0;">Edit Job <span id="editJobRef"></span></h2>
       <button class="btn secondary small" type="button" onclick="closeEditPanel()">Close</button>
     </div>
+    <div class="muted err" id="editReturnedNotice" style="display:none;background:#fdecea;border:1px solid #f1948a;border-radius:6px;padding:8px 10px;margin-bottom:10px;color:#922b21;"></div>
     <div class="grid2">
       <div>
         <label>Assign To Technician</label>
@@ -313,8 +315,9 @@ async function loadJobs() {
   const filter = document.getElementById('statusFilter').value;
   const rows = jobsCache.filter(r => {
     if (filter === 'cancelled') return !!r.cancelled_at;
+    if (filter === 'returned') return !!r.scheduler_return_reason && !r.cancelled_at;
     if (!filter) return true;
-    return r.status === filter && !r.cancelled_at;
+    return r.status === filter && !r.cancelled_at && !r.scheduler_return_reason;
   });
   const tbody = document.querySelector('#jobsTable tbody');
   tbody.innerHTML = rows.map(r => {
@@ -326,7 +329,16 @@ async function loadJobs() {
       statusLabel = 'pending approval';
       badgeClass = 'pending-approval';
     }
+    // The Head reviewed this job and sent it back instead of approving it —
+    // fix it (Edit below) and save to automatically clear the reason and
+    // put it back in front of the Head.
+    if (!r.cancelled_at && r.scheduler_return_reason) {
+      statusLabel = 'returned by head';
+      badgeClass = 'returned-to-scheduler';
+    }
     const statusTitle = r.cancelled_at ? `title="Reason: ${(r.cancel_reason || '').replace(/"/g, '&quot;')}"` : '';
+    const returnedNote = (!r.cancelled_at && r.scheduler_return_reason)
+      ? `<div style="color:#c0392b;font-size:0.85em;margin-top:4px;">Returned by Head: ${r.scheduler_return_reason}</div>` : '';
     const actions = [];
     if (!r.cancelled_at && r.status === 'assigned') {
       actions.push(`<button type="button" class="btn secondary small" onclick="openEditPanel(${r.id})">Edit</button>`);
@@ -340,7 +352,7 @@ async function loadJobs() {
       <td>${r.job_ref}</td>
       <td>${r.customer_name}</td>
       <td>${r.technician_name}</td>
-      <td>${(r.complaint_description || '').slice(0, 60)}${(r.complaint_description || '').length > 60 ? '…' : ''}</td>
+      <td>${(r.complaint_description || '').slice(0, 60)}${(r.complaint_description || '').length > 60 ? '…' : ''}${returnedNote}</td>
       <td><span class="badge ${badgeClass}" ${statusTitle}>${statusLabel}</span></td>
       <td style="white-space:nowrap;">${actions.join(' ')}</td>
     </tr>`;
@@ -371,6 +383,13 @@ function openEditPanel(id) {
   if (!r) return;
   editingJobId = id;
   document.getElementById('editJobRef').textContent = r.job_ref;
+  const returnedNotice = document.getElementById('editReturnedNotice');
+  if (r.scheduler_return_reason) {
+    returnedNotice.style.display = '';
+    returnedNotice.textContent = 'Returned by Head of Department: ' + r.scheduler_return_reason + ' — fix the details below and Save Changes to resend it for approval.';
+  } else {
+    returnedNotice.style.display = 'none';
+  }
   document.getElementById('edit_technician_id').value = r.technician_id;
   document.getElementById('edit_amount').value = r.amount || '';
   document.getElementById('edit_discount').value = r.discount || '';

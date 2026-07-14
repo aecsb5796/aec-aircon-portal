@@ -124,6 +124,7 @@ textarea { resize: vertical; min-height: 70px; }
 .badge.cancelled { background: #f1d4d0; color: var(--danger); }
 .badge.rejected { background: #fbe3d4; color: #c0392b; }
 .badge.pending-approval { background: #ffe8cc; color: #b45309; }
+.badge.returned-to-scheduler { background: #f1d4d0; color: #c0392b; }
 
 .complaint-box { background: #fdf6ec; border: 1px solid #f0dfc0; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 14px; }
 .complaint-box .lbl { font-weight: 700; color: #92650c; display: block; margin-bottom: 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; }
